@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Lịch sử đơn hàng{% endblock %}
+
+{% block body %}
+<div class="min-h-full flex" x-data="{ sidebarOpen: false, filterStatus: 'all' }">
+    
+    {% include "components/sidebar.html" %}
+    
+    <div class="flex-1 flex flex-col min-w-0">
+        {% include "components/topbar.html" %}
+        
+        <main class="flex-1 p-4 lg:p-8 space-y-6">
+            
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-900">Lịch sử đơn hàng</h2>
+                    <p class="text-gray-500 mt-1">{{ bookings | length }} đơn hàng · Nhấn vào đơn để xem chi tiết</p>
+                </div>
+                <a href="/booking" class="inline-flex items-center gap-2 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-medium text-sm rounded-xl transition-colors shadow-sm">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                    Đặt lịch mới
+                </a>
+            </div>
+            
+            <!-- Filters -->
+            <div class="flex flex-wrap gap-2">
+                <button @click="filterStatus = 'all'" :class="filterStatus === 'all' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'" class="px-4 py-2 rounded-xl text-sm font-medium transition-all">
+                    Tất cả
+                </button>
+                <button @click="filterStatus = 'pending'" :class="filterStatus === 'pending' ? 'bg-amber-500 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'" class="px-4 py-2 rounded-xl text-sm font-medium transition-all">
+                    Đang chờ
+                </button>
+                <button @click="filterStatus = 'in_progress'" :class="filterStatus === 'in_progress' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'" class="px-4 py-2 rounded-xl text-sm font-medium transition-all">
+                    Đang giao
+                </button>
+                <button @click="filterStatus = 'completed'" :class="filterStatus === 'completed' ? 'bg-green-500 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'" class="px-4 py-2 rounded-xl text-sm font-medium transition-all">
+                    Hoàn thành
+                </button>
+                <button @click="filterStatus = 'cancelled'" :class="filterStatus === 'cancelled' ? 'bg-red-500 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'" class="px-4 py-2 rounded-xl text-sm font-medium transition-all">
+                    Đã hủy
+                </button>
+            </div>
+            
+            <!-- Orders List -->
+            {% if bookings %}
+            <div class="space-y-3">
+                {% for b in bookings %}
+                <a 
+                    href="/order/{{ b._id }}"
+                    class="block bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all p-5"
+                    x-show="filterStatus === 'all' || filterStatus === '{{ b.status }}'"
+                    x-transition
+                >
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+                        <!-- Icon trạng thái -->
+                        <div class="flex-shrink-0">
+                            {% if b.status == 'completed' %}
+                            <div class="w-11 h-11 bg-green-50 rounded-xl flex items-center justify-center">
+                                <i data-lucide="check-circle-2" class="w-5 h-5 text-green-500"></i>
+                            </div>
+                            {% elif b.status == 'cancelled' %}
+                            <div class="w-11 h-11 bg-red-50 rounded-xl flex items-center justify-center">
+                                <i data-lucide="x-circle" class="w-5 h-5 text-red-500"></i>
+                            </div>
+                            {% elif b.status == 'in_progress' %}
+                            <div class="w-11 h-11 bg-blue-50 rounded-xl flex items-center justify-center">
+                                <i data-lucide="truck" class="w-5 h-5 text-blue-500"></i>
+                            </div>
+                            {% else %}
+                            <div class="w-11 h-11 bg-amber-50 rounded-xl flex items-center justify-center">
+                                <i data-lucide="clock" class="w-5 h-5 text-amber-500"></i>
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Thông tin chính -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-xs font-mono text-gray-400">{{ b._id[:16] }}</span>
+                                {% set status_map = {
+                                    'pending': ('Đang chờ', 'bg-amber-50 text-amber-600 border-amber-200'),
+                                    'confirmed': ('Đã xác nhận', 'bg-blue-50 text-blue-600 border-blue-200'),
+                                    'in_progress': ('Đang giao', 'bg-indigo-50 text-indigo-600 border-indigo-200'),
+                                    'completed': ('Hoàn thành', 'bg-green-50 text-green-600 border-green-200'),
+                                    'cancelled': ('Đã hủy', 'bg-red-50 text-red-600 border-red-200')
+                                } %}
+                                {% set si = status_map.get(b.status, ('Không rõ', 'bg-gray-50 text-gray-600 border-gray-200')) %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border {{ si[1] }}">{{ si[0] }}</span>
+                            </div>
+                            <p class="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-gray-400"></i>
+                                {{ b.pickup_location_name }}
+                            </p>
+                            <p class="text-xs text-gray-500 mt-0.5">
+                                {{ b.pickup_date }} lúc {{ b.pickup_time }} · {{ b.book_count }} cuốn sách
+                                {% if b.note %} · {{ b.note }}{% endif %}
+                            </p>
+                        </div>
+                        
+                        <!-- Actions -->
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            {% if b.status in ['pending', 'confirmed'] %}
+                            <button 
+                                onclick="event.preventDefault(); cancelOrder('{{ b._id }}')"
+                                class="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors"
+                            >
+                                Hủy đơn
+                            </button>
+                            {% endif %}
+                            {% if b.status in ['confirmed', 'in_progress'] %}
+                            <span class="px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 rounded-lg border border-primary-200 flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                                Theo dõi Robot
+                            </span>
+                            {% endif %}
+                            <i data-lucide="chevron-right" class="w-4 h-4 text-gray-300"></i>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
+                <i data-lucide="inbox" class="w-16 h-16 mx-auto text-gray-300 mb-4"></i>
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Chưa có đơn hàng nào</h3>
+                <p class="text-gray-500 mb-6">Hãy đặt lịch giao sách đầu tiên của bạn!</p>
+                <a href="/booking" class="inline-flex items-center gap-2 px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-primary-500/25">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                    Đặt lịch ngay
+                </a>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function cancelOrder(bookingId) {
+    if (!confirm('Bạn có chắc muốn hủy đơn hàng này?')) return;
+    
+    try {
+        const res = await fetch(`/api/bookings/${bookingId}/cancel`, { method: 'POST' });
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('Đã hủy đơn hàng', 'success');
+            setTimeout(() => window.location.reload(), 500);
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (err) {
+        showToast('Lỗi kết nối server', 'error');
+    }
+}
+</script>
+{% endblock %}

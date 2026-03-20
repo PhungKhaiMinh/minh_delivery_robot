@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}Đơn hàng {{ booking._id[:12] }}{% endblock %}
+
+{% block head %}
+{% if is_active %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+{% endif %}
+{% endblock %}
+
+{% block body %}
+<div class="min-h-full flex" x-data="{ sidebarOpen: false }">
+    
+    {% include "components/sidebar.html" %}
+    
+    <div class="flex-1 flex flex-col min-w-0">
+        {% include "components/topbar.html" %}
+        
+        <main class="flex-1 p-4 lg:p-8 space-y-6">
+            
+            <!-- Back + Header -->
+            <div class="flex items-center gap-4">
+                <a href="/history" class="p-2 -ml-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+                    <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                </a>
+                <div class="flex-1">
+                    <h2 class="text-xl lg:text-2xl font-bold text-gray-900">Chi tiết đơn hàng</h2>
+                    <p class="text-sm text-gray-500 font-mono">{{ booking._id }}</p>
+                </div>
+                {% set status_map = {
+                    'pending': ('Đang chờ', 'bg-amber-50 text-amber-700 border-amber-200'),
+                    'confirmed': ('Đã xác nhận', 'bg-blue-50 text-blue-700 border-blue-200'),
+                    'in_progress': ('Đang giao', 'bg-indigo-50 text-indigo-700 border-indigo-200'),
+                    'completed': ('Hoàn thành', 'bg-green-50 text-green-700 border-green-200'),
+                    'cancelled': ('Đã hủy', 'bg-red-50 text-red-700 border-red-200')
+                } %}
+                {% set si = status_map.get(booking.status, ('Không rõ', 'bg-gray-50 text-gray-600 border-gray-200')) %}
+                <span class="inline-flex items-center px-3 py-1.5 rounded-xl text-sm font-semibold border {{ si[1] }}">
+                    {{ si[0] }}
+                </span>
+            </div>
+            
+            <div class="grid grid-cols-1 {{ 'lg:grid-cols-5' if is_active else '' }} gap-6">
+                
+                <!-- Thông tin đơn hàng -->
+                <div class="{{ 'lg:col-span-2' if is_active else 'max-w-2xl' }} space-y-4">
+                    
+                    <!-- Info Card -->
+                    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        <div class="px-5 py-4 border-b border-gray-100">
+                            <h3 class="font-semibold text-gray-900 flex items-center gap-2">
+                                <i data-lucide="info" class="w-4 h-4 text-primary-500"></i>
+                                Thông tin đơn hàng
+                            </h3>
+                        </div>
+                        <div class="p-5 space-y-4">
+                            <div class="flex items-start gap-3">
+                                <div class="w-9 h-9 bg-red-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <i data-lucide="map-pin" class="w-4 h-4 text-red-500"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-gray-500">Điểm nhận sách</p>
+                                    <p class="text-sm font-semibold text-gray-900">{{ booking.pickup_location_name }}</p>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="flex items-start gap-3">
+                                    <div class="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                                        <i data-lucide="calendar" class="w-4 h-4 text-blue-500"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-gray-500">Ngày</p>
+                                        <p class="text-sm font-semibold text-gray-900">{{ booking.pickup_date }}</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-start gap-3">
+                                    <div class="w-9 h-9 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                                        <i data-lucide="clock" class="w-4 h-4 text-purple-500"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-gray-500">Giờ</p>
+                                        <p class="text-sm font-semibold text-gray-900">{{ booking.pickup_time }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-start gap-3">
+                                <div class="w-9 h-9 bg-amber-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <i data-lucide="book-open" class="w-4 h-4 text-amber-500"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-gray-500">Số lượng sách</p>
+                                    <p class="text-sm font-semibold text-gray-900">{{ booking.book_count }} cuốn</p>
+                                </div>
+                            </div>
+                            
+                            {% if booking.note %}
+                            <div class="flex items-start gap-3">
+                                <div class="w-9 h-9 bg-gray-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <i data-lucide="message-square" class="w-4 h-4 text-gray-500"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-gray-500">Ghi chú</p>
+                                    <p class="text-sm text-gray-900">{{ booking.note }}</p>
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <div class="pt-3 border-t border-gray-100 text-xs text-gray-400">
+                                Tạo lúc: {{ booking._created_at[:19] if booking._created_at else 'N/A' }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {% if is_active %}
+                    <!-- Robot Status Card (chỉ hiện khi đơn đang active) -->
+                    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                        <h3 class="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <i data-lucide="bot" class="w-4 h-4 text-primary-500"></i>
+                            Robot đang thực hiện
+                        </h3>
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-500">Tên</span>
+                                <span class="text-sm font-semibold text-gray-900">BK-Bot 01</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-500">Trạng thái</span>
+                                <span class="text-sm font-medium text-green-600" id="robot-status">{{ robot_status }}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-500">Pin</span>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-16 bg-gray-200 rounded-full h-2">
+                                        <div class="bg-green-500 h-2 rounded-full" style="width: {{ robot_battery }}%" id="robot-battery-bar"></div>
+                                    </div>
+                                    <span class="text-sm font-medium text-gray-900" id="robot-battery-text">{{ robot_battery }}%</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-500">Tốc độ</span>
+                                <span class="text-sm font-medium text-gray-900" id="robot-speed">0.0 m/s</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- ETA Card -->
+                    <div class="bg-gradient-to-r from-primary-600 to-accent-600 rounded-2xl p-5 text-white">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                                <i data-lucide="timer" class="w-6 h-6"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm text-white/80">Thời gian dự kiến đến</p>
+                                <p class="text-2xl font-bold" id="eta-value">Đang tính...</p>
+                            </div>
+                        </div>
+                        <p class="text-sm text-white/70 mt-2">Robot đang trên đường đến điểm hẹn của bạn</p>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Actions -->
+                    <div class="flex gap-3">
+                        <a href="/history" class="flex-1 px-4 py-2.5 text-center text-sm font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl transition-colors">
+                            Quay lại danh sách
+                        </a>
+                        {% if booking.status in ['pending', 'confirmed'] %}
+                        <button 
+                            onclick="cancelOrder('{{ booking._id }}')"
+                            class="flex-1 px-4 py-2.5 text-center text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition-colors"
+                        >
+                            Hủy đơn hàng
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                {% if is_active %}
+                <!-- Bản đồ theo dõi Robot (chỉ hiện khi đơn đang active) -->
+                <div class="lg:col-span-3 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                    <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                        <h3 class="font-semibold text-gray-900 flex items-center gap-2">
+                            <i data-lucide="map" class="w-4 h-4 text-primary-500"></i>
+                            Theo dõi Robot real-time
+                        </h3>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                            <span class="text-xs font-medium text-green-600" id="connection-status">Real-time</span>
+                        </div>
+                    </div>
+                    <div id="map" class="flex-1 min-h-[400px] lg:min-h-[500px]"></div>
+                    <div class="px-5 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center gap-6 text-xs text-gray-500">
+                        <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-green-500 rounded-sm"></span> Robot</span>
+                        <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-blue-500 rounded-sm"></span> Đường đi</span>
+                        <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-red-500 rounded-sm"></span> Điểm nhận sách</span>
+                    </div>
+                </div>
+                {% endif %}
+                
+            </div>
+        </main>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function cancelOrder(bookingId) {
+    if (!confirm('Bạn có chắc muốn hủy đơn hàng này?')) return;
+    try {
+        const res = await fetch(`/api/bookings/${bookingId}/cancel`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Đã hủy đơn hàng', 'success');
+            setTimeout(() => window.location.href = '/history', 500);
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (err) {
+        showToast('Lỗi kết nối server', 'error');
+    }
+}
+</script>
+
+{% if is_active %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// === Bản đồ Leaflet tại khu vực ĐHBK TP.HCM ===
+const map = L.map('map').setView([10.7724, 106.6580], 17);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+}).addTo(map);
+
+const robotIcon = L.divIcon({
+    html: '<div style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;background:#22c55e;border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3)"><svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg></div>',
+    className: '',
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+});
+
+const pickupIcon = L.divIcon({
+    html: '<div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:#ef4444;border-radius:50%;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3)"><svg width="16" height="16" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg></div>',
+    className: '',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+});
+
+let robotMarker = L.marker([10.7724, 106.6580], { icon: robotIcon }).addTo(map);
+robotMarker.bindPopup('<b>BK-Bot 01</b><br>Đang vận chuyển sách');
+
+// Điểm nhận sách của đơn hàng này
+const pickupLat = {{ booking.pickup_lat | default(10.7724) }};
+const pickupLng = {{ booking.pickup_lng | default(106.6580) }};
+L.marker([pickupLat, pickupLng], { icon: pickupIcon })
+    .addTo(map)
+    .bindPopup('<b>Điểm nhận sách</b><br>{{ booking.pickup_location_name }}');
+
+// Fit bounds để hiện cả robot và điểm nhận
+const bounds = L.latLngBounds([[10.7724, 106.6580], [pickupLat, pickupLng]]);
+map.fitBounds(bounds.pad(0.3));
+
+// === WebSocket real-time tracking ===
+let ws = null;
+let reconnectInterval = null;
+
+function getCookie(name) {
+    const cookies = document.cookie.split(';');
+    for (let c of cookies) {
+        c = c.trim();
+        if (c.startsWith(name + '=')) return c.substring(name.length + 1);
+    }
+    return '';
+}
+
+function connectWebSocket() {
+    const token = getCookie('access_token');
+    if (!token) return;
+    
+    const wsUrl = `ws://${window.location.host}/api/tracking/ws/${token}`;
+    ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => {
+        document.getElementById('connection-status').textContent = 'Real-time';
+        if (reconnectInterval) { clearInterval(reconnectInterval); reconnectInterval = null; }
+    };
+    
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'robot_position') {
+            updateRobotPosition(data.position);
+        }
+    };
+    
+    ws.onclose = () => {
+        document.getElementById('connection-status').textContent = 'Đang kết nối lại...';
+        if (!reconnectInterval) { reconnectInterval = setInterval(connectWebSocket, 5000); }
+    };
+    
+    ws.onerror = () => ws.close();
+}
+
+function updateRobotPosition(pos) {
+    if (pos.lat && pos.lng) robotMarker.setLatLng([pos.lat, pos.lng]);
+    if (pos.battery !== undefined) {
+        document.getElementById('robot-battery-text').textContent = pos.battery + '%';
+        document.getElementById('robot-battery-bar').style.width = pos.battery + '%';
+    }
+    if (pos.speed !== undefined) document.getElementById('robot-speed').textContent = pos.speed.toFixed(1) + ' m/s';
+}
+
+// Fallback polling
+async function pollRobotPosition() {
+    try {
+        const res = await fetch('/api/tracking/robot/robot_01/position');
+        const data = await res.json();
+        if (data.success && data.position) updateRobotPosition(data.position);
+    } catch (err) {}
+}
+
+connectWebSocket();
+setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) pollRobotPosition();
+}, 3000);
+</script>
+{% endif %}
+{% endblock %}

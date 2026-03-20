@@ -1,0 +1,88 @@
+<!-- Sidebar Navigation Component -->
+<!-- Biến active_page cần được truyền từ route handler -->
+
+<!-- Mobile Overlay -->
+<div 
+    x-show="sidebarOpen" 
+    x-transition:enter="transition-opacity ease-linear duration-300"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition-opacity ease-linear duration-300"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-40 lg:hidden"
+    @click="sidebarOpen = false"
+></div>
+
+<!-- Sidebar -->
+<aside 
+    :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+    class="fixed inset-y-0 left-0 z-50 w-72 bg-gray-900 text-white transition-transform duration-300 lg:relative lg:z-auto flex flex-col"
+>
+    <!-- Logo -->
+    <div class="flex items-center gap-3 px-6 py-5 border-b border-gray-800">
+        <div class="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center">
+            <i data-lucide="bot" class="w-6 h-6 text-white"></i>
+        </div>
+        <div class="flex-1">
+            <h1 class="text-lg font-bold tracking-tight">BK BookBot</h1>
+            <p class="text-xs text-gray-400">Robot giao sách tự hành</p>
+        </div>
+        <button @click="sidebarOpen = false" class="lg:hidden text-gray-400 hover:text-white">
+            <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+    </div>
+    
+    <!-- Navigation -->
+    <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto">
+        <p class="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Menu chính</p>
+        
+        <a href="/dashboard" 
+           class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all {{ 'bg-primary-600/20 text-primary-400 border border-primary-500/20' if active_page == 'dashboard' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
+            <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+            <span>Tổng quan</span>
+        </a>
+        
+        <a href="/booking" 
+           class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all {{ 'bg-primary-600/20 text-primary-400 border border-primary-500/20' if active_page == 'booking' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
+            <i data-lucide="calendar-plus" class="w-5 h-5"></i>
+            <span>Đặt lịch giao sách</span>
+        </a>
+        
+        <a href="/history" 
+           class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all {{ 'bg-primary-600/20 text-primary-400 border border-primary-500/20' if active_page == 'history' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
+            <i data-lucide="clock" class="w-5 h-5"></i>
+            <span>Lịch sử đơn hàng</span>
+        </a>
+        
+        <div class="pt-4">
+            <p class="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Tài khoản</p>
+            
+            <a href="/profile" 
+               class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all {{ 'bg-primary-600/20 text-primary-400 border border-primary-500/20' if active_page == 'profile' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
+                <i data-lucide="user-circle" class="w-5 h-5"></i>
+                <span>Thông tin cá nhân</span>
+            </a>
+        </div>
+    </nav>
+    
+    <!-- User Info + Logout -->
+    <div class="px-4 py-4 border-t border-gray-800">
+        <div class="flex items-center gap-3 px-2 mb-3">
+            <div class="w-9 h-9 bg-primary-600 rounded-lg flex items-center justify-center text-sm font-bold">
+                {{ user.name[0] | upper if user else 'U' }}
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium truncate">{{ user.name if user else 'Người dùng' }}</p>
+                <p class="text-xs text-gray-400 truncate">{{ user.email if user else '' }}</p>
+            </div>
+        </div>
+        <button 
+            onclick="handleLogout()"
+            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-all"
+        >
+            <i data-lucide="log-out" class="w-5 h-5"></i>
+            <span>Đăng xuất</span>
+        </button>
+    </div>
+</aside>

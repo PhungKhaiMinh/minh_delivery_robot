@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}Đăng nhập{% endblock %}
+
+{% block body %}
+<div class="min-h-full flex" x-data="{ showPassword: false }">
+    
+    <!-- Phần bên trái: Branding + Illustration -->
+    <div class="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary-700 via-primary-800 to-primary-900 relative overflow-hidden">
+        <div class="absolute inset-0">
+            <div class="absolute top-20 -left-20 w-96 h-96 bg-primary-600/30 rounded-full blur-3xl"></div>
+            <div class="absolute bottom-20 right-10 w-80 h-80 bg-accent-600/20 rounded-full blur-3xl"></div>
+            <div class="absolute top-1/2 left-1/3 w-64 h-64 bg-primary-400/10 rounded-full blur-2xl"></div>
+        </div>
+        
+        <div class="relative z-10 flex flex-col justify-center px-16 text-white">
+            <div class="flex items-center gap-4 mb-8">
+                <div class="w-16 h-16 bg-white/10 backdrop-blur-sm rounded-2xl flex items-center justify-center border border-white/20">
+                    <i data-lucide="bot" class="w-9 h-9 text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold tracking-tight">BK BookBot</h1>
+                    <p class="text-primary-200 text-sm">ĐHBK TP.HCM</p>
+                </div>
+            </div>
+            
+            <h2 class="text-4xl font-extrabold leading-tight mb-4">
+                Giao sách thông minh<br>
+                <span class="text-primary-300">bằng Robot tự hành</span>
+            </h2>
+            <p class="text-primary-200 text-lg leading-relaxed max-w-md">
+                Đặt lịch giao sách về thư viện chỉ trong vài bước. 
+                Robot sẽ đến điểm hẹn và giao sách đúng giờ.
+            </p>
+            
+            <div class="mt-12 grid grid-cols-3 gap-6">
+                <div class="text-center">
+                    <div class="w-12 h-12 mx-auto bg-white/10 rounded-xl flex items-center justify-center mb-2 border border-white/10">
+                        <i data-lucide="calendar-check" class="w-6 h-6"></i>
+                    </div>
+                    <p class="text-sm text-primary-200">Đặt lịch<br>linh hoạt</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-12 h-12 mx-auto bg-white/10 rounded-xl flex items-center justify-center mb-2 border border-white/10">
+                        <i data-lucide="map-pin" class="w-6 h-6"></i>
+                    </div>
+                    <p class="text-sm text-primary-200">Theo dõi<br>real-time</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-12 h-12 mx-auto bg-white/10 rounded-xl flex items-center justify-center mb-2 border border-white/10">
+                        <i data-lucide="zap" class="w-6 h-6"></i>
+                    </div>
+                    <p class="text-sm text-primary-200">Nhanh chóng<br>& chính xác</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Phần bên phải: Form đăng nhập -->
+    <div class="flex-1 flex items-center justify-center px-6 py-12">
+        <div class="w-full max-w-md">
+            
+            <!-- Mobile Logo -->
+            <div class="lg:hidden flex items-center gap-3 mb-8 justify-center">
+                <div class="w-12 h-12 bg-primary-600 rounded-xl flex items-center justify-center">
+                    <i data-lucide="bot" class="w-7 h-7 text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">BK BookBot</h1>
+                    <p class="text-xs text-gray-500">ĐHBK TP.HCM</p>
+                </div>
+            </div>
+            
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold text-gray-900">Chào mừng trở lại!</h2>
+                <p class="text-gray-500 mt-2">Đăng nhập bằng email sinh viên HCMUT</p>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="flex bg-gray-100 rounded-xl p-1 mb-8">
+                <a href="/login" class="flex-1 py-2.5 text-center text-sm font-semibold rounded-lg bg-white text-primary-600 shadow-sm transition-all">
+                    Đăng nhập
+                </a>
+                <a href="/register" class="flex-1 py-2.5 text-center text-sm font-medium rounded-lg text-gray-500 hover:text-gray-700 transition-all">
+                    Đăng ký
+                </a>
+            </div>
+            
+            <!-- Error Message -->
+            <div id="login-error" class="hidden mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-center gap-2">
+                <i data-lucide="alert-circle" class="w-4 h-4 flex-shrink-0"></i>
+                <span id="login-error-text"></span>
+            </div>
+            
+            <form id="login-form" class="space-y-5" onsubmit="handleLogin(event)">
+                <div>
+                    <label for="email" class="block text-sm font-medium text-gray-700 mb-1.5">Email sinh viên</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                            <i data-lucide="mail" class="w-5 h-5 text-gray-400"></i>
+                        </div>
+                        <input 
+                            type="email" 
+                            id="email" 
+                            name="email" 
+                            placeholder="mssv@hcmut.edu.vn"
+                            required
+                            class="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all outline-none"
+                        >
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700 mb-1.5">Mật khẩu</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                            <i data-lucide="lock" class="w-5 h-5 text-gray-400"></i>
+                        </div>
+                        <input 
+                            :type="showPassword ? 'text' : 'password'" 
+                            id="password" 
+                            name="password" 
+                            placeholder="Nhập mật khẩu"
+                            required
+                            class="w-full pl-11 pr-12 py-3 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all outline-none"
+                        >
+                        <button 
+                            type="button" 
+                            @click="showPassword = !showPassword"
+                            class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-gray-400 hover:text-gray-600"
+                        >
+                            <i x-show="!showPassword" data-lucide="eye" class="w-5 h-5"></i>
+                            <i x-show="showPassword" data-lucide="eye-off" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <button 
+                    type="submit" 
+                    id="login-btn"
+                    class="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white font-semibold rounded-xl shadow-lg shadow-primary-500/25 hover:shadow-primary-500/40 transition-all duration-200 flex items-center justify-center gap-2"
+                >
+                    <span>Đăng nhập</span>
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                </button>
+            </form>
+            
+            <p class="mt-8 text-center text-sm text-gray-500">
+                Chưa có tài khoản? 
+                <a href="/register" class="text-primary-600 font-semibold hover:text-primary-700 transition-colors">Đăng ký ngay</a>
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    const errorDiv = document.getElementById('login-error');
+    const errorText = document.getElementById('login-error-text');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="animate-spin w-5 h-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> <span>Đang xử lý...</span>';
+    errorDiv.classList.add('hidden');
+    
+    const formData = new FormData(document.getElementById('login-form'));
+    
+    try {
+        const res = await fetch('/api/auth/login', { method: 'POST', body: formData });
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('Đăng nhập thành công!', 'success');
+            setTimeout(() => window.location.href = '/dashboard', 500);
+        } else {
+            errorText.textContent = data.message;
+            errorDiv.classList.remove('hidden');
+        }
+    } catch (err) {
+        errorText.textContent = 'Lỗi kết nối server';
+        errorDiv.classList.remove('hidden');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Đăng nhập</span> <i data-lucide="arrow-right" class="w-4 h-4"></i>';
+        lucide.createIcons();
+    }
+}
+</script>
+{% endblock %}
