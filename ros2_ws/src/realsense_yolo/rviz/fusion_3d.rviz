@@ -1,0 +1,100 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /TF1
+        - /Camera Axes1
+        - /LiDAR Axes1
+        - /Depth Map 3D (surface)1
+        - /Depth PointCloud1
+        - /LiDAR PointCloud1
+        - /YOLO 3D Boxes1
+      Splitter Ratio: 0.5
+  - Class: rviz_common/Views
+    Name: Views
+    Splitter Ratio: 0.5
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Length: 0.2
+      Name: Camera Axes
+      Radius: 0.02
+      Reference Frame: camera_depth_optical_frame
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Length: 0.2
+      Name: LiDAR Axes
+      Radius: 0.02
+      Reference Frame: laser
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Depth Map 3D (surface)
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /realsense_yolo/depth_image_plane
+      Size (Pixels): 4
+      Style: Points
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Depth PointCloud
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /realsense_yolo/depth_pointcloud
+      Size (Pixels): 2
+      Style: Points
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: LiDAR PointCloud
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /realsense_yolo/lidar_pointcloud
+      Size (Pixels): 5
+      Style: Points
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: YOLO 3D Boxes
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /realsense_yolo/detection_boxes_3d
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: laser
+    Frame Rate: 20
+  Name: root
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Target Frame: laser
+      Distance: 4
+      Yaw: 0.0
+      Pitch: 0.45
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 800
+  Views:
+    collapsed: false
+  Width: 1280

@@ -1,27 +1,34 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-.venv/
-env/
-.env
 *.egg-info/
-.eggs/
+*.egg
 dist/
 build/
+*.so
 
-# IDE / OS
-.idea/
+# ROS2 build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# YOLO model weights (auto-downloaded)
+*.pt
+*.onnx
+*.engine
+
+# IDE
 .vscode/
+.idea/
 *.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Local secrets (never commit)
-.env.local
-*.pem
-
-# Optional: uncomment if you do NOT want user/booking data on GitHub
-# data/collections/
+# Env
+.env
+venv/
+env/
