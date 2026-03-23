@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
 """
-Fusion 3D: Depth point cloud + depth map surface (3D) + LiDAR point cloud + YOLO 3D bounding boxes.
+Fusion 3D: Depth point cloud + LiDAR point cloud + YOLO 3D bounding boxes
+        + Optimized obstacle topic for obstacle avoidance.
 
-- Subscribe: depth image, camera_info, /scan, /realsense_yolo/detections
-- Publish (frame camera_depth_optical_frame):
-  - /realsense_yolo/depth_pointcloud (PointCloud2) - điểm 3D từ depth (đỏ gần, xanh xa)
-  - /realsense_yolo/depth_image_plane (PointCloud2) - bề mặt độ sâu trong 3D, màu JET (depth map trong view 3D)
-  - /realsense_yolo/lidar_pointcloud (PointCloud2) - từ /scan (đã transform sang camera)
-  - /realsense_yolo/detection_boxes_3d (MarkerArray) - hộp 3D cho mỗi detection
-
-Depth map hiển thị trong môi trường 3D RViz (không dùng cửa sổ Image bên trái).
+Subscribe: depth image, camera_info, /scan, /realsense_yolo/detections
+Publish (visualization, frame camera_depth_optical_frame):
+  - /realsense_yolo/depth_pointcloud    (PointCloud2)
+  - /realsense_yolo/depth_image_plane   (PointCloud2)
+  - /realsense_yolo/lidar_pointcloud    (PointCloud2)
+  - /realsense_yolo/detection_boxes_3d  (MarkerArray)
+Publish (avoidance input, frame laser):
+  - /obstacles  (delivery_interfaces/ObstacleArray)
+    QoS: BestEffort, KeepLast(1), Volatile — always latest, never stale.
 """
+
+import time as _time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image, LaserScan, CameraInfo, PointCloud2, PointField
 from std_msgs.msg import Float32MultiArray, Header
 from visualization_msgs.msg import MarkerArray, Marker
+from geometry_msgs.msg import Point
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
 from tf2_ros import Buffer, TransformListener, TransformException
+
+from delivery_interfaces.msg import Obstacle, ObstacleArray
 
 COCO_NAMES = [
     'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
@@ -37,12 +45,10 @@ COCO_NAMES = [
 
 
 def make_point_cloud2(header, frame_id, xyz, rgb=None):
-    """Create PointCloud2 from Nx3 xyz and optional Nx3 RGB [0-255].
-    Uses standard x,y,z,rgb(float32 packed) layout for RViz stability."""
+    """Create PointCloud2 from Nx3 xyz and optional Nx3 RGB [0-255]."""
     n = len(xyz)
     if n == 0:
         return None
-    # Loại bỏ inf/nan để RViz không crash (exit -11)
     valid = np.isfinite(xyz).all(axis=1)
     if not np.any(valid):
         return None
@@ -52,7 +58,6 @@ def make_point_cloud2(header, frame_id, xyz, rgb=None):
     n = len(xyz)
     if rgb is None:
         rgb = np.ones((n, 3), dtype=np.uint8) * 128
-    # Standard packed RGB as float32 (PCL/RViz-friendly): point_step = 16
     rgb_u32 = (
         (rgb[:, 0].astype(np.uint32) << 16) |
         (rgb[:, 1].astype(np.uint32) << 8) |
@@ -86,6 +91,7 @@ class Fusion3DNode(Node):
     def __init__(self):
         super().__init__('fusion_3d_node')
 
+        # ── Parameters ────────────────────────────────────────────
         self.declare_parameter('depth_topic', '/camera/aligned_depth_to_color/image_raw')
         self.declare_parameter('camera_info_topic', '/camera/aligned_depth_to_color/camera_info')
         self.declare_parameter('scan_topic', '/scan')
@@ -93,58 +99,120 @@ class Fusion3DNode(Node):
         self.declare_parameter('depth_pointcloud_topic', '/realsense_yolo/depth_pointcloud')
         self.declare_parameter('lidar_pointcloud_topic', '/realsense_yolo/lidar_pointcloud')
         self.declare_parameter('markers_3d_topic', '/realsense_yolo/detection_boxes_3d')
+        self.declare_parameter('depth_image_plane_topic', '/realsense_yolo/depth_image_plane')
         self.declare_parameter('camera_frame', 'camera_depth_optical_frame')
         self.declare_parameter('laser_frame', 'laser')
-        self.declare_parameter('depth_scale', 0.001)  # depth in mm -> m
+        self.declare_parameter('depth_scale', 0.001)
         self.declare_parameter('depth_max_m', 10.0)
-        self.declare_parameter('depth_step', 4)  # subsample depth image
+        self.declare_parameter('depth_step', 4)
+        self.declare_parameter('depth_plane_step', 10)
         self.declare_parameter('lidar_max_range', 10.0)
-        self.declare_parameter('depth_image_plane_topic', '/realsense_yolo/depth_image_plane')
-        self.declare_parameter('depth_plane_step', 10)  # subsample for depth-map surface
         self.declare_parameter('report_period_s', 1.0)
+        self.declare_parameter('obstacle_topic', '/obstacles')
+        self.declare_parameter('obstacle_rate_hz', 10.0)
 
-        self.camera_frame = self.get_parameter('camera_frame').get_parameter_value().string_value
-        self.laser_frame = self.get_parameter('laser_frame').get_parameter_value().string_value
-        self.depth_scale = self.get_parameter('depth_scale').get_parameter_value().double_value
-        self.depth_max_m = self.get_parameter('depth_max_m').get_parameter_value().double_value
-        self.depth_step = int(self.get_parameter('depth_step').get_parameter_value().integer_value)
-        self.lidar_max_range = self.get_parameter('lidar_max_range').get_parameter_value().double_value
-        self.depth_plane_step = int(self.get_parameter('depth_plane_step').get_parameter_value().integer_value)
-        self.report_period_s = self.get_parameter('report_period_s').get_parameter_value().double_value
-        self._last_tf_warn_sec = -1
+        self.camera_frame = self._str_param('camera_frame')
+        self.laser_frame = self._str_param('laser_frame')
+        self.depth_scale = self._dbl_param('depth_scale')
+        self.depth_max_m = self._dbl_param('depth_max_m')
+        self.depth_step = int(self._int_param('depth_step'))
+        self.depth_plane_step = int(self._int_param('depth_plane_step'))
+        self.lidar_max_range = self._dbl_param('lidar_max_range')
+        self.report_period_s = self._dbl_param('report_period_s')
+        obstacle_rate = self._dbl_param('obstacle_rate_hz')
 
+        # ── Sensor state ──────────────────────────────────────────
         self.bridge = CvBridge()
         self._depth = None
         self._depth_header = None
         self._camera_info = None
         self._scan = None
         self._detections = None
+
+        # Dirty flags: skip obstacle recomputation when nothing changed
+        self._depth_dirty = False
+        self._scan_dirty = False
+        self._det_dirty = False
+
+        # Cached static TF (laser↔camera is constant)
+        self._cached_tf_lc = None          # laser ← camera
+        self._cached_R_lc = None
+        self._cached_tvec_lc = None
+        self._tf_cache_attempts = 0
+
+        # Pre-computed LiDAR scan geometry (recompute only when config changes)
+        self._scan_n = 0
+        self._scan_angles_rad = None
+        self._scan_cos = None
+        self._scan_sin = None
+
+        # Obstacle publisher state
+        self._obs_seq = 0
+        self._last_obstacles = []          # cached result for report reuse
+        self._lidar_active = False
+        self._last_scan_time = 0.0
+
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._last_tf_warn_sec = -1
 
-        self.create_subscription(Image, self.get_parameter('depth_topic').get_parameter_value().string_value, self._depth_cb, 10)
-        self.create_subscription(CameraInfo, self.get_parameter('camera_info_topic').get_parameter_value().string_value, self._camera_info_cb, 10)
-        self.create_subscription(LaserScan, self.get_parameter('scan_topic').get_parameter_value().string_value, self._scan_cb, 10)
-        self.create_subscription(Float32MultiArray, self.get_parameter('detections_topic').get_parameter_value().string_value, self._det_cb, 10)
+        # ── Subscribers ───────────────────────────────────────────
+        self.create_subscription(
+            Image, self._str_param('depth_topic'), self._depth_cb, 10)
+        self.create_subscription(
+            CameraInfo, self._str_param('camera_info_topic'), self._camera_info_cb, 10)
+        self.create_subscription(
+            LaserScan, self._str_param('scan_topic'), self._scan_cb, 10)
+        self.create_subscription(
+            Float32MultiArray, self._str_param('detections_topic'), self._det_cb, 10)
 
-        self._pub_depth_pc = self.create_publisher(PointCloud2, self.get_parameter('depth_pointcloud_topic').get_parameter_value().string_value, 10)
-        self._pub_lidar_pc = self.create_publisher(PointCloud2, self.get_parameter('lidar_pointcloud_topic').get_parameter_value().string_value, 10)
-        self._pub_markers = self.create_publisher(MarkerArray, self.get_parameter('markers_3d_topic').get_parameter_value().string_value, 10)
+        # ── Visualization publishers (standard QoS) ───────────────
+        self._pub_depth_pc = self.create_publisher(
+            PointCloud2, self._str_param('depth_pointcloud_topic'), 10)
+        self._pub_lidar_pc = self.create_publisher(
+            PointCloud2, self._str_param('lidar_pointcloud_topic'), 10)
+        self._pub_markers = self.create_publisher(
+            MarkerArray, self._str_param('markers_3d_topic'), 10)
         self._pub_depth_plane = self.create_publisher(
-            PointCloud2,
-            self.get_parameter('depth_image_plane_topic').get_parameter_value().string_value,
-            10,
+            PointCloud2, self._str_param('depth_image_plane_topic'), 10)
+
+        # ── Obstacle publisher (optimized QoS for avoidance) ──────
+        obs_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
         )
+        self._pub_obstacles = self.create_publisher(
+            ObstacleArray, self._str_param('obstacle_topic'), obs_qos)
 
-        self._timer = self.create_timer(0.12, self._publish_3d)  # ~8 Hz for RViz stability
-        self._report_timer = self.create_timer(max(0.2, self.report_period_s), self._report_objects)
+        # ── Timers ────────────────────────────────────────────────
+        self._timer_viz = self.create_timer(0.12, self._publish_3d)
+        obs_period = max(0.02, 1.0 / max(1.0, obstacle_rate))
+        self._timer_obs = self.create_timer(obs_period, self._publish_obstacles)
+        self._timer_report = self.create_timer(
+            max(0.5, self.report_period_s), self._report_objects)
 
-        self.get_logger().info('Fusion3D: depth + LiDAR -> PointCloud2, detections -> 3D MarkerArray')
+        self.get_logger().info(
+            f'Fusion3D: obstacle topic={self._str_param("obstacle_topic")} '
+            f'@ {obstacle_rate:.0f} Hz, QoS=BestEffort/KeepLast(1)')
 
+    # ── Param helpers ─────────────────────────────────────────────
+    def _str_param(self, name):
+        return self.get_parameter(name).get_parameter_value().string_value
+
+    def _dbl_param(self, name):
+        return self.get_parameter(name).get_parameter_value().double_value
+
+    def _int_param(self, name):
+        return self.get_parameter(name).get_parameter_value().integer_value
+
+    # ── Callbacks (with dirty flags) ──────────────────────────────
     def _depth_cb(self, msg):
         try:
             self._depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
             self._depth_header = msg.header
+            self._depth_dirty = True
         except Exception as e:
             self.get_logger().error(f'Depth cb: {e}')
 
@@ -153,63 +221,52 @@ class Fusion3DNode(Node):
 
     def _scan_cb(self, msg):
         self._scan = msg
+        self._scan_dirty = True
+        self._last_scan_time = _time.monotonic()
+        n = len(msg.ranges)
+        if n != self._scan_n:
+            self._scan_n = n
+            angles = np.arange(n, dtype=np.float64) * msg.angle_increment + msg.angle_min
+            self._scan_angles_rad = angles
+            self._scan_cos = np.cos(angles)
+            self._scan_sin = np.sin(angles)
 
     def _det_cb(self, msg):
         self._detections = msg
+        self._det_dirty = True
 
-    @staticmethod
-    def _class_name(cls_id):
-        i = int(cls_id)
-        if 0 <= i < len(COCO_NAMES):
-            return COCO_NAMES[i]
-        return f'class_{i}'
-
-    @staticmethod
-    def _class_color_rgb(cls_id):
-        hue = (int(cls_id) * 37) % 180
-        hsv = np.uint8([[[hue, 220, 255]]])
-        bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
-        return np.array([int(bgr[2]), int(bgr[1]), int(bgr[0])], dtype=np.uint8)  # RGB
-
-    def _lookup_transform(self, target_frame, source_frame, timeout_s=0.1):
-        try:
-            return self._tf_buffer.lookup_transform(
-                target_frame, source_frame, rclpy.time.Time(),
-                timeout=rclpy.duration.Duration(seconds=timeout_s)
-            )
-        except TransformException:
-            return None
-
-    @staticmethod
-    def _quat_to_rot(qx, qy, qz, qw):
-        return np.array([
-            [1 - 2*qy*qy - 2*qz*qz, 2*qx*qy - 2*qw*qz, 2*qx*qz + 2*qw*qy],
-            [2*qx*qy + 2*qw*qz, 1 - 2*qx*qx - 2*qz*qz, 2*qy*qz - 2*qw*qx],
-            [2*qx*qz - 2*qw*qy, 2*qy*qz + 2*qw*qx, 1 - 2*qx*qx - 2*qy*qy]
+    # ── TF cache (static transform — lookup once) ────────────────
+    def _ensure_tf_cache(self):
+        if self._cached_R_lc is not None:
+            return True
+        self._tf_cache_attempts += 1
+        if self._tf_cache_attempts > 200 and self._tf_cache_attempts % 50 != 0:
+            return False
+        t = self._lookup_transform(self.laser_frame, self.camera_frame, 0.05)
+        if t is None:
+            return False
+        q = t.transform.rotation
+        self._cached_R_lc = self._quat_to_rot(q.x, q.y, q.z, q.w)
+        self._cached_tvec_lc = np.array([
+            t.transform.translation.x,
+            t.transform.translation.y,
+            t.transform.translation.z,
         ], dtype=np.float64)
+        self._cached_tf_lc = t
+        self.get_logger().info('TF laser←camera cached (static)')
+        return True
 
-    @staticmethod
-    def _angle_mask(angles_deg, right_deg, left_deg):
-        # Normal case: right <= left (e.g., -12 .. +8)
-        if right_deg <= left_deg:
-            return (angles_deg >= right_deg) & (angles_deg <= left_deg)
-        # Wrap-around case (rare): interval crosses -180/180
-        return (angles_deg >= right_deg) | (angles_deg <= left_deg)
-
-    def _report_objects(self):
+    # ── Core obstacle computation ─────────────────────────────────
+    def _compute_obstacles(self):
+        """Compute obstacle list from current sensor data.
+        Returns list of dicts with all fields needed for ObstacleArray."""
         if self._detections is None or self._camera_info is None or self._depth is None:
-            return
+            return []
+        if not self._ensure_tf_cache():
+            return []
 
-        t_lc = self._lookup_transform(self.laser_frame, self.camera_frame, timeout_s=0.05)
-        if t_lc is None:
-            return
-        q = t_lc.transform.rotation
-        R_lc = self._quat_to_rot(q.x, q.y, q.z, q.w)
-        tvec_lc = np.array([
-            t_lc.transform.translation.x,
-            t_lc.transform.translation.y,
-            t_lc.transform.translation.z
-        ], dtype=np.float64)
+        R_lc = self._cached_R_lc
+        tvec_lc = self._cached_tvec_lc
 
         depth_raw = np.asarray(self._depth, dtype=np.float32)
         if depth_raw.size and np.nanmax(depth_raw) > 100:
@@ -221,21 +278,26 @@ class Fusion3DNode(Node):
         K = self._camera_info.k
         fx, fy = float(K[0]), float(K[4])
         cx, cy = float(K[2]), float(K[5])
+        if fx == 0.0 or fy == 0.0:
+            return []
 
-        scan_angles_deg = None
+        # Pre-fetch LiDAR data once
+        has_lidar = (
+            self._scan is not None
+            and self._scan_angles_rad is not None
+            and len(self._scan.ranges) > 0
+        )
         scan_ranges = None
-        if self._scan is not None and len(self._scan.ranges) > 0:
-            n = len(self._scan.ranges)
-            scan_angles_deg = np.degrees(
-                np.arange(n, dtype=np.float64) * self._scan.angle_increment + self._scan.angle_min
-            )
+        scan_angles_rad = None
+        if has_lidar:
             scan_ranges = np.array(self._scan.ranges, dtype=np.float32)
+            scan_angles_rad = self._scan_angles_rad
 
         data = np.array(self._detections.data, dtype=np.float32)
         if data.size < 7:
-            return
+            return []
         dets = data.reshape(-1, 7)
-        reports = []
+        obstacles = []
 
         for row in dets:
             x1, y1, x2, y2, det_depth_m, cls_id, conf = row
@@ -246,12 +308,11 @@ class Fusion3DNode(Node):
             if x2i <= x1i or y2i <= y1i:
                 continue
 
-            # Sample depth points inside bbox to estimate object span/range.
             sx = max(2, (x2i - x1i) // 24)
             sy = max(2, (y2i - y1i) // 24)
             uu, vv = np.meshgrid(
                 np.arange(x1i, x2i + 1, sx, dtype=np.float32),
-                np.arange(y1i, y2i + 1, sy, dtype=np.float32)
+                np.arange(y1i, y2i + 1, sy, dtype=np.float32),
             )
             z = depth_m[vv.astype(int), uu.astype(int)].ravel()
             valid = (z > 0.05) & (z < self.depth_max_m) & np.isfinite(z)
@@ -262,56 +323,129 @@ class Fusion3DNode(Node):
             v = vv.ravel()[valid]
             x_cam = (u - cx) * z / fx
             y_cam = (v - cy) * z / fy
-            pts_cam = np.stack([x_cam, y_cam, z], axis=0)  # 3xN
-            pts_laser = (R_lc @ pts_cam).T + tvec_lc  # Nx3
+            pts_cam = np.stack([x_cam, y_cam, z], axis=0)         # 3×N
+            pts_laser = (R_lc @ pts_cam).T + tvec_lc              # N×3
 
-            # LiDAR convention requested: left positive, right negative.
-            ang_deg = np.degrees(np.arctan2(pts_laser[:, 1], pts_laser[:, 0]))
-            left_deg = float(np.max(ang_deg))
-            right_deg = float(np.min(ang_deg))
-            depth_nearest = float(np.min(np.linalg.norm(pts_laser[:, :2], axis=1)))
+            ang_rad = np.arctan2(pts_laser[:, 1], pts_laser[:, 0])
+            angle_max_rad = float(np.max(ang_rad))   # left edge
+            angle_min_rad = float(np.min(ang_rad))   # right edge
+            angle_center = float(np.mean(ang_rad))
+            horiz_dists = np.linalg.norm(pts_laser[:, :2], axis=1)
+            depth_distance = float(np.min(horiz_dists))
 
-            lidar_nearest = None
-            if scan_angles_deg is not None and scan_ranges is not None:
-                m = self._angle_mask(scan_angles_deg, right_deg, left_deg)
+            # Estimate width: arc length at median distance
+            median_dist = float(np.median(horiz_dists))
+            width_m = median_dist * abs(angle_max_rad - angle_min_rad)
+
+            lidar_distance = -1.0
+            if has_lidar:
+                right_deg = np.degrees(angle_min_rad)
+                left_deg = np.degrees(angle_max_rad)
+                m = self._angle_mask_deg(
+                    np.degrees(scan_angles_rad), right_deg, left_deg)
                 r = scan_ranges[m]
                 r_valid = r[np.isfinite(r) & (r > 0.02) & (r < self.lidar_max_range)]
                 if r_valid.size > 0:
-                    lidar_nearest = float(np.min(r_valid))
+                    lidar_distance = float(np.min(r_valid))
 
-            if lidar_nearest is not None:
-                nearest = lidar_nearest
-                source = 'lidar'
+            if lidar_distance > 0:
+                best_dist = lidar_distance
+                source = Obstacle.SOURCE_LIDAR
             else:
-                nearest = depth_nearest if depth_nearest > 0 else float(det_depth_m)
-                source = 'depth'
+                best_dist = depth_distance if depth_distance > 0 else float(det_depth_m)
+                source = Obstacle.SOURCE_DEPTH
 
-            reports.append({
-                'name': self._class_name(int(cls_id)),
-                'conf': float(conf),
-                'nearest': float(nearest),
+            cls_id_int = int(cls_id)
+            obstacles.append({
+                'distance': best_dist,
+                'angle': angle_center,
+                'angle_min': angle_min_rad,
+                'angle_max': angle_max_rad,
+                'width': width_m,
+                'depth_distance': depth_distance,
+                'lidar_distance': lidar_distance,
+                'class_id': cls_id_int,
+                'class_name': self._class_name(cls_id_int),
+                'confidence': float(conf),
                 'source': source,
-                'left_deg': left_deg,
-                'right_deg': right_deg,
-                'span_deg': float(left_deg - right_deg),
             })
 
-        if reports:
-            self.get_logger().info('--- Fusion object report (1s) ---')
-            for r in reports:
-                self.get_logger().info(
-                    f"{r['name']} conf={r['conf']:.2f} "
-                    f"nearest={r['nearest']:.2f}m source={r['source']} "
-                    f"angles=[{r['right_deg']:.1f}°, {r['left_deg']:.1f}°] span={r['span_deg']:.1f}°"
-                )
+        obstacles.sort(key=lambda o: o['distance'])
+        return obstacles
 
+    # ── Obstacle publisher (high-rate, optimized QoS) ─────────────
+    def _publish_obstacles(self):
+        any_dirty = self._depth_dirty or self._scan_dirty or self._det_dirty
+        if not any_dirty and self._last_obstacles is not None:
+            # No new data → re-publish cached result with updated timestamp
+            if not self._last_obstacles:
+                return
+            obstacles = self._last_obstacles
+        else:
+            self._depth_dirty = False
+            self._scan_dirty = False
+            self._det_dirty = False
+            t0 = _time.monotonic()
+            obstacles = self._compute_obstacles()
+            compute_ms = (_time.monotonic() - t0) * 1000.0
+            self._last_obstacles = obstacles
+            self._last_compute_ms = compute_ms
+
+        self._lidar_active = (_time.monotonic() - self._last_scan_time) < 2.0
+
+        msg = ObstacleArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.laser_frame
+        msg.seq = self._obs_seq
+        self._obs_seq += 1
+        msg.lidar_active = self._lidar_active
+        msg.compute_ms = getattr(self, '_last_compute_ms', 0.0)
+
+        for o in obstacles:
+            obs = Obstacle()
+            obs.distance = o['distance']
+            obs.angle = o['angle']
+            obs.angle_min = o['angle_min']
+            obs.angle_max = o['angle_max']
+            obs.width = o['width']
+            obs.depth_distance = o['depth_distance']
+            obs.lidar_distance = o['lidar_distance']
+            obs.class_id = o['class_id']
+            obs.class_name = o['class_name']
+            obs.confidence = o['confidence']
+            obs.source = o['source']
+            msg.obstacles.append(obs)
+
+        self._pub_obstacles.publish(msg)
+
+    # ── Terminal report (low-rate, human-readable) ────────────────
+    def _report_objects(self):
+        obstacles = self._last_obstacles
+        if not obstacles:
+            return
+        src_names = {Obstacle.SOURCE_DEPTH: 'depth',
+                     Obstacle.SOURCE_LIDAR: 'lidar',
+                     Obstacle.SOURCE_FUSED: 'fused'}
+        self.get_logger().info(
+            f'--- Obstacles ({len(obstacles)}) seq={self._obs_seq} '
+            f'lidar={"ON" if self._lidar_active else "OFF"} '
+            f'compute={getattr(self, "_last_compute_ms", 0):.1f}ms ---')
+        for o in obstacles:
+            self.get_logger().info(
+                f"  {o['class_name']} conf={o['confidence']:.2f} "
+                f"dist={o['distance']:.2f}m src={src_names.get(o['source'], '?')} "
+                f"angle=[{np.degrees(o['angle_min']):.1f}°,{np.degrees(o['angle_max']):.1f}°] "
+                f"w={o['width']:.2f}m "
+                f"(depth={o['depth_distance']:.2f}m lidar={'%.2f' % o['lidar_distance'] if o['lidar_distance'] > 0 else 'N/A'}m)")
+
+    # ── Visualization publisher (unchanged logic) ─────────────────
     def _publish_3d(self):
         stamp = self.get_clock().now().to_msg()
         header = Header()
         header.stamp = stamp
         header.frame_id = self.camera_frame
 
-        # 1) Depth -> PointCloud2 (độ sâu thật trong 3D, màu đỏ=gần xanh=xa)
+        # 1) Depth → PointCloud2
         if self._depth is not None and self._camera_info is not None:
             K = self._camera_info.k
             fx, fy = float(K[0]), float(K[4])
@@ -319,7 +453,7 @@ class Fusion3DNode(Node):
             h, w = self._depth.shape[:2]
             depth = np.asarray(self._depth, dtype=np.float32)
             if depth.size and np.nanmax(depth) > 100:
-                depth = depth * self.depth_scale  # mm -> m
+                depth = depth * self.depth_scale
             step = max(1, self.depth_step)
             u = np.arange(0, w, step)
             v = np.arange(0, h, step)
@@ -333,13 +467,13 @@ class Fusion3DNode(Node):
             xyz = np.stack([x, y, z], axis=1)
             if len(xyz) > 0:
                 rgb = np.zeros((len(xyz), 3), dtype=np.uint8)
-                rgb[:, 0] = np.clip(255 * (1 - z / self.depth_max_m), 0, 255).astype(np.uint8)  # red near
-                rgb[:, 2] = np.clip(255 * z / self.depth_max_m, 0, 255).astype(np.uint8)  # blue far
+                rgb[:, 0] = np.clip(255 * (1 - z / self.depth_max_m), 0, 255).astype(np.uint8)
+                rgb[:, 2] = np.clip(255 * z / self.depth_max_m, 0, 255).astype(np.uint8)
                 pc = make_point_cloud2(header, self.camera_frame, xyz, rgb)
                 if pc:
                     self._pub_depth_pc.publish(pc)
 
-        # 1b) Depth map trong 3D: bề mặt độ sâu thật (x,y,z từ depth), màu JET như ảnh depth
+        # 1b) Depth map surface (3D JET colormap)
         if self._depth is not None and self._camera_info is not None:
             K = self._camera_info.k
             fx, fy = float(K[0]), float(K[4])
@@ -347,7 +481,7 @@ class Fusion3DNode(Node):
             h, w = self._depth.shape[:2]
             depth_raw = np.asarray(self._depth, dtype=np.float32)
             if depth_raw.size and np.nanmax(depth_raw) > 100:
-                depth_m = depth_raw * self.depth_scale  # mm -> m
+                depth_m = depth_raw * self.depth_scale
             else:
                 depth_m = depth_raw.copy()
             step = max(1, self.depth_plane_step)
@@ -362,11 +496,9 @@ class Fusion3DNode(Node):
             x = (uu_flat - cx) * z / fx
             y = (vv_flat - cy) * z / fy
             xyz_surf = np.stack([x, y, z], axis=1).astype(np.float32)
-            # Màu JET theo độ sâu (đỏ gần, xanh xa) giống ảnh depth
             depth_8 = np.clip(255.0 * z / self.depth_max_m, 0, 255).astype(np.uint8)
             colormap_bgr = cv2.applyColorMap(depth_8.reshape(-1, 1), cv2.COLORMAP_JET)
-            rgb_surf = colormap_bgr.reshape(-1, 3)[:, ::-1]  # BGR -> RGB
-            # Overlay class color onto depth-map points inside YOLO bboxes
+            rgb_surf = colormap_bgr.reshape(-1, 3)[:, ::-1]
             if self._detections is not None and len(self._detections.data) >= 7:
                 det_arr = np.array(self._detections.data, dtype=np.float32).reshape(-1, 7)
                 for d in det_arr:
@@ -384,55 +516,36 @@ class Fusion3DNode(Node):
             if pc_surf:
                 self._pub_depth_plane.publish(pc_surf)
 
-        # 2) LiDAR -> PointCloud2 (transform to camera frame)
-        if self._scan is not None:
-            n = len(self._scan.ranges)
-            angles = np.arange(n, dtype=np.float64) * self._scan.angle_increment + self._scan.angle_min
+        # 2) LiDAR → PointCloud2 (transform to camera frame)
+        if self._scan is not None and self._scan_angles_rad is not None:
             ranges = np.array(self._scan.ranges, dtype=np.float32)
             valid = np.isfinite(ranges) & (ranges > 0) & (ranges < self.lidar_max_range)
-            angles = angles[valid]
-            ranges = ranges[valid]
-            x_l = ranges * np.cos(angles)
-            y_l = ranges * np.sin(angles)
-            z_l = np.zeros_like(ranges)
-            p_l = np.stack([x_l, y_l, z_l], axis=0)
-            source_frames = []
-            if self._scan.header.frame_id:
-                source_frames.append(self._scan.header.frame_id)
-            if self.laser_frame and self.laser_frame not in source_frames:
-                source_frames.append(self.laser_frame)
-            t = None
-            for src in source_frames:
-                try:
-                    t = self._tf_buffer.lookup_transform(
-                        self.camera_frame, src,
-                        rclpy.time.Time(), timeout=rclpy.duration.Duration(seconds=0.1)
-                    )
-                    break
-                except TransformException:
-                    t = None
-            if t is None:
-                now_sec = int(self.get_clock().now().nanoseconds / 1e9)
-                if now_sec != self._last_tf_warn_sec and now_sec % 5 == 0:
-                    self._last_tf_warn_sec = now_sec
-                    self.get_logger().warn(
-                        f'Cannot transform LiDAR to {self.camera_frame}. '
-                        f'scan frame={self._scan.header.frame_id}, configured laser_frame={self.laser_frame}'
-                    )
-            else:
-                qx, qy, qz, qw = t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w
-                R = self._quat_to_rot(qx, qy, qz, qw)
-                p_c = (R @ p_l).T + np.array([t.transform.translation.x, t.transform.translation.y, t.transform.translation.z])
-                xyz = p_c
-                if len(xyz) > 0:
-                    rgb = np.full((len(xyz), 3), 0, dtype=np.uint8)
-                    rgb[:, 1] = 255  # green for LiDAR
-                    pc = make_point_cloud2(header, self.camera_frame, xyz, rgb)
+            r = ranges[valid]
+            if r.size > 0:
+                cos_v = self._scan_cos[valid]
+                sin_v = self._scan_sin[valid]
+                x_l = r * cos_v
+                y_l = r * sin_v
+                z_l = np.zeros_like(r)
+                p_l = np.stack([x_l, y_l, z_l], axis=0)
+                t = self._get_lidar_to_camera_tf()
+                if t is not None:
+                    qx, qy, qz, qw = (t.transform.rotation.x, t.transform.rotation.y,
+                                       t.transform.rotation.z, t.transform.rotation.w)
+                    R = self._quat_to_rot(qx, qy, qz, qw)
+                    tvec = np.array([t.transform.translation.x,
+                                     t.transform.translation.y,
+                                     t.transform.translation.z])
+                    p_c = (R @ p_l).T + tvec
+                    rgb = np.full((len(p_c), 3), 0, dtype=np.uint8)
+                    rgb[:, 1] = 255
+                    pc = make_point_cloud2(header, self.camera_frame, p_c, rgb)
                     if pc:
                         self._pub_lidar_pc.publish(pc)
 
-        # 3) Detections -> 3D bounding box markers
-        if self._detections is not None and self._camera_info is not None and len(self._detections.data) >= 7:
+        # 3) Detections → 3D bounding box markers
+        if (self._detections is not None and self._camera_info is not None
+                and len(self._detections.data) >= 7):
             K = self._camera_info.k
             fx, fy = float(K[0]), float(K[4])
             cx, cy = float(K[2]), float(K[5])
@@ -454,38 +567,99 @@ class Fusion3DNode(Node):
                 w_m = max(0.03, w_px * depth_m / fx)
                 h_m = max(0.03, h_px * depth_m / fy)
                 d_m = float(np.clip(0.5 * (w_m + h_m), 0.05, 1.0))
-                center_z = depth_m + d_m / 2.0  # depth_m is near/front face
-                half = np.array([w_m/2, h_m/2, d_m/2])
+                center_z = depth_m + d_m / 2.0
+                half = np.array([w_m / 2, h_m / 2, d_m / 2])
                 c = np.array([center_x, center_y, center_z])
-                # 12 edges of box: (p1, p2) pairs
                 edges = [
-                    ([-1,-1,-1], [1,-1,-1]), ([-1,-1,-1], [-1,1,-1]), ([-1,-1,-1], [-1,-1,1]),
-                    ([1,-1,-1], [1,1,-1]), ([1,-1,-1], [1,-1,1]),
-                    ([-1,1,-1], [1,1,-1]), ([-1,1,-1], [-1,1,1]),
-                    ([1,1,-1], [1,1,1]), ([1,-1,1], [1,1,1]), ([1,-1,1], [-1,-1,1]),
-                    ([-1,1,1], [1,1,1]), ([-1,1,1], [-1,-1,1]),
+                    ([-1, -1, -1], [1, -1, -1]), ([-1, -1, -1], [-1, 1, -1]),
+                    ([-1, -1, -1], [-1, -1, 1]), ([1, -1, -1], [1, 1, -1]),
+                    ([1, -1, -1], [1, -1, 1]), ([-1, 1, -1], [1, 1, -1]),
+                    ([-1, 1, -1], [-1, 1, 1]), ([1, 1, -1], [1, 1, 1]),
+                    ([1, -1, 1], [1, 1, 1]), ([1, -1, 1], [-1, -1, 1]),
+                    ([-1, 1, 1], [1, 1, 1]), ([-1, 1, 1], [-1, -1, 1]),
                 ]
-                from geometry_msgs.msg import Point
-                m = Marker()
-                m.header = header
-                m.ns = 'bbox3d'
-                m.id = i
-                m.type = Marker.LINE_LIST
-                m.action = Marker.ADD
-                m.scale.x = 0.02
+                mk = Marker()
+                mk.header = header
+                mk.ns = 'bbox3d'
+                mk.id = i
+                mk.type = Marker.LINE_LIST
+                mk.action = Marker.ADD
+                mk.scale.x = 0.02
                 cls_rgb = self._class_color_rgb(int(cls_id))
-                m.color.r = float(cls_rgb[0]) / 255.0
-                m.color.g = float(cls_rgb[1]) / 255.0
-                m.color.b = float(cls_rgb[2]) / 255.0
-                m.color.a = 1.0
+                mk.color.r = float(cls_rgb[0]) / 255.0
+                mk.color.g = float(cls_rgb[1]) / 255.0
+                mk.color.b = float(cls_rgb[2]) / 255.0
+                mk.color.a = 1.0
                 for e1, e2 in edges:
                     p1 = c + np.array(e1) * half
                     p2 = c + np.array(e2) * half
-                    m.points.append(Point(x=float(p1[0]), y=float(p1[1]), z=float(p1[2])))
-                    m.points.append(Point(x=float(p2[0]), y=float(p2[1]), z=float(p2[2])))
-                markers.markers.append(m)
+                    mk.points.append(Point(x=float(p1[0]), y=float(p1[1]), z=float(p1[2])))
+                    mk.points.append(Point(x=float(p2[0]), y=float(p2[1]), z=float(p2[2])))
+                markers.markers.append(mk)
             if markers.markers:
                 self._pub_markers.publish(markers)
+
+    # ── Helpers ───────────────────────────────────────────────────
+    def _get_lidar_to_camera_tf(self):
+        """Get TF laser→camera (for pointcloud viz). Uses cache if available."""
+        if self._cached_tf_lc is not None:
+            # Invert cached laser←camera to get camera←laser
+            # But we need camera←laser for viz. Let's look up directly.
+            pass
+        source_frames = []
+        if self._scan and self._scan.header.frame_id:
+            source_frames.append(self._scan.header.frame_id)
+        if self.laser_frame and self.laser_frame not in source_frames:
+            source_frames.append(self.laser_frame)
+        for src in source_frames:
+            try:
+                return self._tf_buffer.lookup_transform(
+                    self.camera_frame, src,
+                    rclpy.time.Time(), timeout=rclpy.duration.Duration(seconds=0.05))
+            except TransformException:
+                pass
+        now_sec = int(self.get_clock().now().nanoseconds / 1e9)
+        if now_sec != self._last_tf_warn_sec and now_sec % 5 == 0:
+            self._last_tf_warn_sec = now_sec
+            self.get_logger().warn(
+                f'Cannot transform LiDAR to {self.camera_frame}. '
+                f'scan frame={self._scan.header.frame_id if self._scan else "?"}, '
+                f'laser_frame={self.laser_frame}')
+        return None
+
+    def _lookup_transform(self, target_frame, source_frame, timeout_s=0.1):
+        try:
+            return self._tf_buffer.lookup_transform(
+                target_frame, source_frame, rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=timeout_s))
+        except TransformException:
+            return None
+
+    @staticmethod
+    def _class_name(cls_id):
+        i = int(cls_id)
+        return COCO_NAMES[i] if 0 <= i < len(COCO_NAMES) else f'class_{i}'
+
+    @staticmethod
+    def _class_color_rgb(cls_id):
+        hue = (int(cls_id) * 37) % 180
+        hsv = np.uint8([[[hue, 220, 255]]])
+        bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+        return np.array([int(bgr[2]), int(bgr[1]), int(bgr[0])], dtype=np.uint8)
+
+    @staticmethod
+    def _quat_to_rot(qx, qy, qz, qw):
+        return np.array([
+            [1 - 2*qy*qy - 2*qz*qz, 2*qx*qy - 2*qw*qz, 2*qx*qz + 2*qw*qy],
+            [2*qx*qy + 2*qw*qz, 1 - 2*qx*qx - 2*qz*qz, 2*qy*qz - 2*qw*qx],
+            [2*qx*qz - 2*qw*qy, 2*qy*qz + 2*qw*qx, 1 - 2*qx*qx - 2*qy*qy],
+        ], dtype=np.float64)
+
+    @staticmethod
+    def _angle_mask_deg(angles_deg, right_deg, left_deg):
+        if right_deg <= left_deg:
+            return (angles_deg >= right_deg) & (angles_deg <= left_deg)
+        return (angles_deg >= right_deg) | (angles_deg <= left_deg)
 
 
 def main(args=None):

@@ -210,6 +210,8 @@ def generate_launch_description():
                     'depth_plane_step': 10,
                     'report_period_s': 1.0,
                     'lidar_max_range': 10.0,
+                    'obstacle_topic': '/obstacles',
+                    'obstacle_rate_hz': 10.0,
                 }],
                 output='screen',
                 additional_env={'LD_PRELOAD': '/lib/aarch64-linux-gnu/libgomp.so.1'},

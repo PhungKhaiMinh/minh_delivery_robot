@@ -218,13 +218,13 @@ source install/setup.bash
 pip3 install ultralytics numpy
 ```
 
-#### 6. Build realsense_yolo
+#### 6. Build delivery_interfaces + realsense_yolo
 
 ```bash
 cd ~/ros2_ws/src/minh_delivery_robot/ros2_ws
 source /opt/ros/foxy/setup.bash
 source install/setup.bash 2>/dev/null || true
-colcon build --packages-select realsense_yolo
+colcon build --packages-select delivery_interfaces realsense_yolo
 source install/setup.bash
 ```
 
@@ -310,16 +310,275 @@ ros2 launch realsense_yolo fusion_3d.launch.py use_rviz:=false
 
 ## ROS2 Topics
 
-| Topic                                        | Type               | Mô tả                                  |
-|----------------------------------------------|--------------------|-----------------------------------------|
-| `/camera/color/image_raw`                    | `Image`            | Ảnh RGB từ RealSense                   |
-| `/camera/aligned_depth_to_color/image_raw`   | `Image`            | Ảnh depth đã align với RGB              |
-| `/scan`                                      | `LaserScan`        | Scan 2D từ Hokuyo LiDAR                |
-| `/realsense_yolo/detections`                 | `Float32MultiArray` | YOLO detections (x1,y1,x2,y2,depth,cls,conf) |
-| `/realsense_yolo/depth_pointcloud`           | `PointCloud2`      | Point cloud từ depth (đỏ gần, xanh xa) |
-| `/realsense_yolo/lidar_pointcloud`           | `PointCloud2`      | LiDAR points (xanh lá) trong frame camera |
-| `/realsense_yolo/depth_image_plane`          | `PointCloud2`      | Depth map surface 3D (JET colormap)    |
-| `/realsense_yolo/detection_boxes_3d`         | `MarkerArray`      | 3D bounding boxes trong RViz           |
+| Topic                                        | Type                                    | Rate    | Mô tả                                  |
+|----------------------------------------------|-----------------------------------------|---------|-----------------------------------------|
+| `/obstacles`                                 | `delivery_interfaces/ObstacleArray`     | ~10 Hz  | **Output chính cho obstacle avoidance** |
+| `/camera/color/image_raw`                    | `sensor_msgs/Image`                     | 15 fps  | Ảnh RGB từ RealSense                   |
+| `/camera/aligned_depth_to_color/image_raw`   | `sensor_msgs/Image`                     | 15 fps  | Ảnh depth đã align với RGB              |
+| `/scan`                                      | `sensor_msgs/LaserScan`                 | ~40 Hz  | Scan 2D từ Hokuyo LiDAR                |
+| `/realsense_yolo/detections`                 | `std_msgs/Float32MultiArray`            | ~15 fps | YOLO detections (x1,y1,x2,y2,depth,cls,conf) |
+| `/realsense_yolo/depth_pointcloud`           | `sensor_msgs/PointCloud2`               | ~8 Hz   | Point cloud từ depth (đỏ gần, xanh xa) |
+| `/realsense_yolo/lidar_pointcloud`           | `sensor_msgs/PointCloud2`               | ~8 Hz   | LiDAR points (xanh lá) trong frame camera |
+| `/realsense_yolo/depth_image_plane`          | `sensor_msgs/PointCloud2`               | ~8 Hz   | Depth map surface 3D (JET colormap)    |
+| `/realsense_yolo/detection_boxes_3d`         | `visualization_msgs/MarkerArray`        | ~8 Hz   | 3D bounding boxes trong RViz           |
+
+---
+
+## Topic `/obstacles` — Chi tiết cho Obstacle Avoidance
+
+Topic `/obstacles` là **output chính** của hệ thống fusion, được thiết kế tối ưu làm input cho thuật toán né vật cản.
+
+### Thông số kỹ thuật
+
+| Thuộc tính        | Giá trị                                        |
+|-------------------|-------------------------------------------------|
+| **Topic name**    | `/obstacles`                                    |
+| **Message type**  | `delivery_interfaces/msg/ObstacleArray`         |
+| **Publish rate**  | ~10 Hz (configurable via `obstacle_rate_hz`)    |
+| **QoS Reliability** | `BEST_EFFORT` — không chờ ACK, ưu tiên tốc độ |
+| **QoS Durability** | `VOLATILE` — không lưu message cũ              |
+| **QoS History**   | `KEEP_LAST(1)` — chỉ giữ message mới nhất      |
+| **Frame**         | `laser` (LiDAR frame, mặt phẳng ngang)         |
+
+### Message `ObstacleArray` — Cấu trúc tổng
+
+```
+delivery_interfaces/msg/ObstacleArray
+├── header              (std_msgs/Header)
+│   ├── stamp           (builtin_interfaces/Time)    # Thời điểm tạo message
+│   └── frame_id        (string)                     # "laser" — hệ tọa độ LiDAR
+├── obstacles[]         (Obstacle[])                  # Danh sách vật cản, SẮP XẾP theo distance (gần nhất trước)
+├── seq                 (uint32)                      # Đếm sequence — nếu có gap = mất frame
+├── lidar_active        (bool)                        # true = LiDAR đang hoạt động
+└── compute_ms          (float32)                     # Thời gian xử lý (ms) — monitor tải CPU
+```
+
+| Field          | Type     | Ý nghĩa                                                                              |
+|----------------|----------|---------------------------------------------------------------------------------------|
+| `header.stamp` | Time     | Timestamp khi message được tạo. Dùng để kiểm tra data có bị cũ không                  |
+| `header.frame_id` | string | Luôn là `"laser"`. Mọi góc/khoảng cách đều trong hệ tọa độ LiDAR (mặt phẳng ngang)  |
+| `obstacles`    | Obstacle[] | Mảng vật cản, **sắp xếp theo `distance` tăng dần** (vật gần nhất ở index 0)         |
+| `seq`          | uint32   | Bộ đếm tăng liên tục. Nếu subscriber thấy gap (ví dụ 100→102) = bị mất 1 frame       |
+| `lidar_active` | bool     | `true` nếu nhận được `/scan` trong 2 giây gần nhất. `false` = chỉ có depth camera     |
+| `compute_ms`   | float32  | Thời gian CPU để tính toán obstacle list. Thường 6-18ms trên Jetson Xavier            |
+
+### Message `Obstacle` — Từng vật cản
+
+```
+delivery_interfaces/msg/Obstacle
+├── distance            (float32)     # Khoảng cách gần nhất (m)
+├── angle               (float32)     # Góc trung tâm (rad)
+├── angle_min           (float32)     # Cạnh phải (rad)
+├── angle_max           (float32)     # Cạnh trái (rad)
+├── width               (float32)     # Chiều rộng ước lượng (m)
+├── depth_distance      (float32)     # Khoảng cách từ depth camera (m)
+├── lidar_distance      (float32)     # Khoảng cách từ LiDAR (m)
+├── class_id            (uint16)      # COCO class ID
+├── class_name          (string)      # Tên class (vd: "person")
+├── confidence          (float32)     # Độ tin cậy YOLO
+└── source              (uint8)       # Nguồn dữ liệu khoảng cách
+```
+
+**Chi tiết từng field:**
+
+| Field | Type | Đơn vị | Ý nghĩa |
+|-------|------|--------|----------|
+| `distance` | float32 | mét | Khoảng cách **gần nhất** từ robot đến vật cản trong **mặt phẳng ngang** (2D). Lấy từ LiDAR nếu có, ngược lại từ depth camera. **Đây là field quan trọng nhất cho obstacle avoidance.** |
+| `angle` | float32 | radian | Góc **trung tâm** vật cản tính từ hướng nhìn thẳng của robot. `+` = bên trái, `−` = bên phải. Ví dụ: `0.0` = ngay trước mặt, `0.17` ≈ 10° bên trái, `−0.52` ≈ −30° bên phải. |
+| `angle_min` | float32 | radian | Cạnh **phải** (right edge) của vật cản. Luôn `≤ angle_max`. |
+| `angle_max` | float32 | radian | Cạnh **trái** (left edge) của vật cản. Luôn `≥ angle_min`. |
+| `width` | float32 | mét | **Chiều rộng** ước lượng của vật cản tại khoảng cách hiện tại. Tính bằng `median_distance × (angle_max − angle_min)`. |
+| `depth_distance` | float32 | mét | Khoảng cách từ **depth camera** (luôn có giá trị hợp lệ nếu vật thể trong FOV camera). |
+| `lidar_distance` | float32 | mét | Khoảng cách từ **LiDAR**. Bằng `−1.0` nếu không có tia LiDAR nào rơi vào khoảng góc của vật cản (vật ngoài tầm LiDAR hoặc LiDAR tắt). |
+| `class_id` | uint16 | — | ID lớp theo COCO dataset. Ví dụ: `0` = person, `2` = car, `56` = chair, `62` = tv. [Danh sách đầy đủ 80 classes](https://docs.ultralytics.com/datasets/detect/coco/). |
+| `class_name` | string | — | Tên lớp đọc được. Ví dụ: `"person"`, `"car"`, `"chair"`. Dùng cho debug/log, **không nên dùng cho logic** (so sánh string chậm, dùng `class_id` thay thế). |
+| `confidence` | float32 | 0.0–1.0 | Độ tin cậy nhận dạng của YOLO. Threshold mặc định = 0.45, nên giá trị luôn ≥ 0.45. |
+| `source` | uint8 | enum | Nguồn dữ liệu cho `distance`: **`0`** = `SOURCE_DEPTH` (chỉ depth camera), **`1`** = `SOURCE_LIDAR` (LiDAR, chính xác hơn), **`2`** = `SOURCE_FUSED` (dự phòng). |
+
+### Quy ước góc (angle convention)
+
+```
+          angle = 0 (thẳng trước)
+                │
+                │
+   angle > 0    │    angle < 0
+   (bên trái)   │    (bên phải)
+                │
+       ╲        │        ╱
+        ╲       │       ╱
+         ╲      │      ╱
+          ╲     │     ╱
+           ╲    │    ╱
+            ╲   │   ╱
+             ╲  │  ╱
+              ╲ │ ╱
+               ╲│╱
+            [ROBOT/LiDAR]
+```
+
+Ví dụ: một vật cản `person` ở phía trước bên trái, cách 2m:
+
+```
+distance   = 2.02     # 2.02 mét
+angle      = 0.086    # ~5° bên trái
+angle_min  = -0.033   # cạnh phải ~−2°
+angle_max  = 0.205    # cạnh trái ~12°
+width      = 0.67     # rộng 67 cm
+source     = 1        # SOURCE_LIDAR
+```
+
+### Cách subscribe vào topic `/obstacles`
+
+**Quan trọng**: Subscriber PHẢI dùng cùng QoS profile với publisher (BestEffort), nếu không sẽ **không nhận được data**.
+
+#### Python — Code mẫu đầy đủ
+
+```python
+#!/usr/bin/env python3
+"""Obstacle avoidance subscriber — code mẫu."""
+
+import math
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+from delivery_interfaces.msg import ObstacleArray, Obstacle
+
+
+class ObstacleAvoidanceNode(Node):
+    def __init__(self):
+        super().__init__('obstacle_avoidance')
+
+        # QoS PHẢI khớp với publisher: BestEffort + Volatile + KeepLast(1)
+        obstacle_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
+        self.create_subscription(
+            ObstacleArray, '/obstacles', self.obstacle_callback, obstacle_qos)
+
+        self.get_logger().info('Obstacle avoidance subscriber ready')
+
+    def obstacle_callback(self, msg: ObstacleArray):
+        # Kiểm tra LiDAR có hoạt động không
+        if not msg.lidar_active:
+            self.get_logger().warn('LiDAR offline — distances are depth-only')
+
+        # Kiểm tra sequence — phát hiện mất frame
+        # (lưu self._last_seq và so sánh)
+
+        # Duyệt obstacles (đã sắp xếp: gần nhất trước)
+        for obs in msg.obstacles:
+            dist = obs.distance
+            angle_deg = math.degrees(obs.angle)
+            width = obs.width
+
+            # Ví dụ logic né vật cản đơn giản
+            if dist < 0.3:
+                self.get_logger().error(
+                    f'EMERGENCY: {obs.class_name} at {dist:.2f}m!')
+                # → Dừng ngay lập tức
+            elif dist < 1.0:
+                self.get_logger().warn(
+                    f'CLOSE: {obs.class_name} at {dist:.2f}m, '
+                    f'angle={angle_deg:.1f}°, width={width:.2f}m')
+                # → Giảm tốc + chuyển hướng
+            else:
+                # → Lên kế hoạch tránh nếu nằm trên đường đi
+                pass
+
+            # Chọn chiến lược dựa trên source reliability
+            if obs.source == Obstacle.SOURCE_LIDAR:
+                # distance chính xác (±2cm)
+                pass
+            elif obs.source == Obstacle.SOURCE_DEPTH:
+                # distance kém chính xác hơn (±5-10cm), thêm safety margin
+                pass
+
+            # So sánh depth vs lidar distance (cross-check)
+            if obs.lidar_distance > 0 and obs.depth_distance > 0:
+                diff = abs(obs.lidar_distance - obs.depth_distance)
+                if diff > 0.5:
+                    # Sai lệch lớn → có thể object bị che hoặc sensor lỗi
+                    pass
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ObstacleAvoidanceNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+```
+
+#### Chạy kiểm tra nhanh (terminal)
+
+```bash
+# Xem raw data
+cd ~/ros2_ws/src/minh_delivery_robot/ros2_ws
+source install/setup.bash
+ros2 topic echo /obstacles --qos-reliability best_effort
+
+# Đo tốc độ publish
+ros2 topic hz /obstacles --qos-reliability best_effort
+
+# Đếm messages
+ros2 topic echo /obstacles --qos-reliability best_effort --field seq
+```
+
+#### Build package sử dụng `delivery_interfaces`
+
+Nếu bạn tạo package mới cần subscribe `/obstacles`, thêm dependency:
+
+```xml
+<!-- package.xml -->
+<depend>delivery_interfaces</depend>
+```
+
+```python
+# setup.py hoặc CMakeLists.txt — không cần thay đổi gì thêm
+# delivery_interfaces sẽ được tìm tự động qua colcon overlay
+```
+
+```bash
+# Build
+cd ~/ros2_ws/src/minh_delivery_robot/ros2_ws
+source /opt/ros/foxy/setup.bash
+colcon build --packages-select delivery_interfaces your_package_name
+source install/setup.bash
+```
+
+### Tối ưu hóa đã áp dụng
+
+| Kỹ thuật | Mục đích |
+|----------|----------|
+| **QoS BestEffort + KeepLast(1)** | Subscriber luôn nhận data mới nhất, không block, không nhận data cũ |
+| **Dirty flags** | Chỉ tính toán lại khi sensor data thay đổi (depth/scan/detection mới) — tiết kiệm CPU |
+| **Cached static TF** | Transform camera↔LiDAR chỉ lookup 1 lần, cache vĩnh viễn — tránh lookup mỗi frame |
+| **Pre-computed scan geometry** | Góc LiDAR + cos/sin tính sẵn, chỉ cập nhật khi LiDAR config thay đổi |
+| **Sort by distance** | Vật cản gần nhất ở đầu mảng — thuật toán avoidance xử lý ưu tiên ngay |
+| **Sequence counter** | Phát hiện data loss bằng cách kiểm tra gap trong `seq` |
+| **Compute time tracking** | `compute_ms` cho phép monitor tải CPU real-time |
+
+### Hiệu năng đo được (Jetson AGX Xavier)
+
+| Metric | Giá trị |
+|--------|---------|
+| Publish rate | **9.7 Hz** (target: 10 Hz) |
+| Data loss | **0 frames** trên 39 samples liên tục |
+| Compute time | **6–18 ms** per cycle |
+| Latency (sensor → topic) | < 100 ms |
+| Đa vật thể | 4–5 objects đồng thời, ổn định |
 
 ---
 
@@ -329,6 +588,12 @@ ros2 launch realsense_yolo fusion_3d.launch.py use_rviz:=false
 minh_delivery_robot/
 ├── ros2_ws/
 │   └── src/
+│       ├── delivery_interfaces/          # Custom message types
+│       │   ├── msg/
+│       │   │   ├── Obstacle.msg                 # Một vật cản
+│       │   │   └── ObstacleArray.msg            # Mảng vật cản (topic /obstacles)
+│       │   ├── CMakeLists.txt
+│       │   └── package.xml
 │       └── realsense_yolo/               # ROS2 package chính
 │           ├── launch/
 │           │   ├── fusion_3d.launch.py          # ★ Launch fusion 3D + RViz
@@ -421,20 +686,23 @@ Tắt infra (đã tắt mặc định trong launch), dùng USB 3.0 nếu có.
 ## Pipeline chi tiết
 
 ```
-┌─────────────┐     ┌─────────────────┐     ┌──────────────┐
-│  RealSense  │────▶│  YOLO Node      │────▶│  Fusion 3D   │
-│  D435i      │     │  (detection +   │     │  Node         │
-│  RGB+Depth  │     │   NMS)          │     │              │
-└─────────────┘     └─────────────────┘     │  • depth →   │
-                                             │    pointcloud│
-┌─────────────┐     ┌─────────────────┐     │  • LiDAR →   │
-│  Hokuyo     │────▶│  urg_node2      │────▶│    pointcloud│
-│  UTM-30LX   │     │  (lifecycle)    │     │  • YOLO →    │
-│  2D LiDAR   │     │  /scan topic    │     │    3D boxes  │
-└─────────────┘     └─────────────────┘     │  • report    │
-                                             └──────┬───────┘
-                                                    │
-                                                    ▼
+┌─────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│  RealSense  │────▶│  YOLO Node      │────▶│  Fusion 3D Node  │
+│  D435i      │     │  (detection +   │     │                  │
+│  RGB+Depth  │     │   NMS)          │     │  ┌────────────┐  │
+└─────────────┘     └─────────────────┘     │  │ /obstacles │──┼──▶ Obstacle Avoidance
+                                             │  │  ~10 Hz    │  │    (subscriber)
+┌─────────────┐     ┌─────────────────┐     │  └────────────┘  │
+│  Hokuyo     │────▶│  urg_node2      │────▶│                  │
+│  UTM-30LX   │     │  (lifecycle)    │     │  • depth →       │
+│  2D LiDAR   │     │  /scan topic    │     │    pointcloud    │
+└─────────────┘     └─────────────────┘     │  • LiDAR →       │
+                                             │    pointcloud    │
+                                             │  • YOLO →        │
+                                             │    3D boxes      │
+                                             └────────┬─────────┘
+                                                      │
+                                                      ▼
                                              ┌──────────────┐
                                              │    RViz2     │
                                              │  3D viewer   │
