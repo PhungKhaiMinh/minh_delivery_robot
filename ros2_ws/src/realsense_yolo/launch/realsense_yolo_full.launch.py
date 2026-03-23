@@ -44,17 +44,15 @@ def generate_launch_description():
             name='camera',
             namespace='camera',
             parameters=[{
-                'align_depth': LaunchConfiguration('align_depth', default='true'),
+                'align_depth.enable': True,
                 'enable_gyro': False,
                 'enable_accel': False,
-                'color_width': 1280,
-                'color_height': 720,
-                'depth_width': 1280,
-                'depth_height': 720,
-                'color_fps': 30.0,
-                'depth_fps': 30.0,
-                'color_qos': 'DEFAULT',
-                'depth_qos': 'DEFAULT',
+                'enable_infra1': False,
+                'enable_infra2': False,
+                'enable_sync': True,
+                'rgb_camera.profile': '640x480x15',
+                'depth_module.profile': '640x480x15',
+                'initial_reset': True,
             }],
             output='screen',
         ),
@@ -69,6 +67,7 @@ def generate_launch_description():
                 'yolo_model': LaunchConfiguration('yolo_model'),
             }],
             output='screen',
+            additional_env={'LD_PRELOAD': '/lib/aarch64-linux-gnu/libgomp.so.1'},
         ),
 
         Node(
@@ -88,6 +87,7 @@ def generate_launch_description():
             name='image_viewer_node',
             parameters=[{'show_color': True}],
             output='screen',
+            additional_env={'LD_PRELOAD': '/lib/aarch64-linux-gnu/libgomp.so.1'},
             condition=IfCondition(
                 PythonExpression(["'", LaunchConfiguration('use_image_viewer'), "' == 'true'"])
             ),

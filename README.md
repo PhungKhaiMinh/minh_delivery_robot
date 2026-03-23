@@ -66,7 +66,7 @@ source install/setup.bash
 
 ```bash
 cd ~/minh_delivery_robot/ros2_ws/src
-git clone https://github.com/Hokuyo-aut/urg_node2.git -b foxy-devel
+git clone https://github.com/Hokuyo-aut/urg_node2.git
 cd ~/minh_delivery_robot/ros2_ws
 rosdep install -i --from-paths src/urg_node2 --rosdistro foxy -y
 colcon build --packages-select urg_node2

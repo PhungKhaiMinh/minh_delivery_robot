@@ -14,11 +14,10 @@ Trước khi chạy:
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, TimerAction, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, TimerAction, IncludeLaunchDescription, Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 from launch.conditions import IfCondition
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 
@@ -34,13 +33,8 @@ def generate_launch_description():
         has_urg_node2 = False
 
     return LaunchDescription([
-        DeclareLaunchArgument('align_depth', default_value='true'),
-        DeclareLaunchArgument('color_width', default_value='640'),
-        DeclareLaunchArgument('color_height', default_value='480'),
-        DeclareLaunchArgument('depth_width', default_value='640'),
-        DeclareLaunchArgument('depth_height', default_value='480'),
-        DeclareLaunchArgument('color_fps', default_value='15.0'),
-        DeclareLaunchArgument('depth_fps', default_value='15.0'),
+        DeclareLaunchArgument('rgb_profile', default_value='640x480x15'),
+        DeclareLaunchArgument('depth_profile', default_value='640x480x15'),
         DeclareLaunchArgument('scan_topic', default_value='/scan', description='LiDAR scan topic'),
         DeclareLaunchArgument('laser_frame', default_value='laser'),
         DeclareLaunchArgument('lidar_x', default_value='0.0', description='Laser X in camera frame (m)'),
@@ -54,18 +48,14 @@ def generate_launch_description():
             name='camera',
             namespace='camera',
             parameters=[{
-                'align_depth': LaunchConfiguration('align_depth'),
+                'align_depth.enable': True,
                 'enable_gyro': False,
                 'enable_accel': False,
                 'enable_infra1': False,
                 'enable_infra2': False,
-                'enable_sync': False,
-                'color_width': LaunchConfiguration('color_width'),
-                'color_height': LaunchConfiguration('color_height'),
-                'depth_width': LaunchConfiguration('depth_width'),
-                'depth_height': LaunchConfiguration('depth_height'),
-                'color_fps': ParameterValue(LaunchConfiguration('color_fps'), value_type=float),
-                'depth_fps': ParameterValue(LaunchConfiguration('depth_fps'), value_type=float),
+                'enable_sync': True,
+                'rgb_camera.profile': LaunchConfiguration('rgb_profile'),
+                'depth_module.profile': LaunchConfiguration('depth_profile'),
                 'initial_reset': True,
             }],
             output='screen',
@@ -109,6 +99,7 @@ def generate_launch_description():
                         'imgsz': 640,
                     }],
                     output='screen',
+                    additional_env={'LD_PRELOAD': '/lib/aarch64-linux-gnu/libgomp.so.1'},
                 ),
                 Node(
                     package='realsense_yolo',
@@ -123,6 +114,7 @@ def generate_launch_description():
                         'lidar_max_range': 10.0,
                     }],
                     output='screen',
+                    additional_env={'LD_PRELOAD': '/lib/aarch64-linux-gnu/libgomp.so.1'},
                 ),
                 Node(
                     package='realsense_yolo',
@@ -133,6 +125,8 @@ def generate_launch_description():
                         'fused_topic': '/realsense_yolo/fused_depth_lidar',
                     }],
                     output='screen',
+                    additional_env={'LD_PRELOAD': '/lib/aarch64-linux-gnu/libgomp.so.1'},
+                    on_exit=Shutdown(reason='User closed viewer window'),
                 ),
             ],
         ),

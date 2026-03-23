@@ -115,24 +115,25 @@ class RealsenseYoloNode(Node):
             self._depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
 
     def _get_frame_pair(self):
-        """Returns (color, depth, header) only when BOTH are available and sizes match.
-        Returns None otherwise - output must always be depth map + bboxes, never color."""
+        """Returns (color, depth, header) only when BOTH are available.
+        Resizes depth to match color if sizes differ."""
         with self._lock:
             if self._color_image is None or self._depth_image is None:
                 return None
-            if self._color_image.shape[:2] != self._depth_image.shape[:2]:
-                if not self._logged_size_mismatch:
-                    self._logged_size_mismatch = True
-                    self.get_logger().warn(
-                        f'Color/depth size mismatch: color {self._color_image.shape[:2]} '
-                        f'vs depth {self._depth_image.shape[:2]}. Enable align_depth and match resolution.'
-                    )
-                return None
-            return (
-                self._color_image.copy(),
-                self._depth_image.copy(),
-                self._depth_header,
-            )
+            color = self._color_image.copy()
+            depth = self._depth_image.copy()
+            header = self._depth_header
+
+        ch, cw = color.shape[:2]
+        dh, dw = depth.shape[:2]
+        if (ch, cw) != (dh, dw):
+            if not self._logged_size_mismatch:
+                self._logged_size_mismatch = True
+                self.get_logger().warn(
+                    f'Color {cw}x{ch} vs depth {dw}x{dh} — resizing depth to match color'
+                )
+            depth = cv2.resize(depth, (cw, ch), interpolation=cv2.INTER_NEAREST)
+        return (color, depth, header)
 
     def _get_depth_at_point(self, depth_image, x, y):
         if depth_image is None:

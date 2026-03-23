@@ -2,9 +2,11 @@
 """
 Simple OpenCV image viewer for RealSense + YOLO output.
 Displays images at native resolution - guaranteed to work without RViz/rqt.
-Placeholder size (720x1280) matches default camera resolution.
+Press 'q' or ESC to quit (terminates entire launch).
 """
 
+import os
+import signal
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
@@ -18,7 +20,7 @@ class ImageViewerNode(Node):
         super().__init__('image_viewer_node')
         self.declare_parameter('yolo_topic', '/realsense_yolo/depth_with_bboxes')
         self.declare_parameter('color_topic', '/camera/color/image_raw')
-        self.declare_parameter('fused_topic', '')  # optional: /realsense_yolo/fused_depth_lidar
+        self.declare_parameter('fused_topic', '')
         self.declare_parameter('show_color', True)
 
         yolo_topic = self.get_parameter('yolo_topic').get_parameter_value().string_value
@@ -33,8 +35,7 @@ class ImageViewerNode(Node):
         self.yolo_image = None
         self.color_image = None
         self.fused_image = None
-        self.yolo_received = False
-        self.color_received = False
+        self._quit = False
 
         self.create_subscription(Image, yolo_topic, self._yolo_cb, 10)
         if self.show_color:
@@ -45,7 +46,7 @@ class ImageViewerNode(Node):
         else:
             self.show_fused = False
 
-        self.timer = self.create_timer(0.03, self._display_cb)  # ~33 Hz
+        self.timer = self.create_timer(0.03, self._display_cb)
         self.get_logger().info(
             f'ImageViewer: {yolo_topic}' +
             (f', {color_topic}' if self.show_color else '') +
@@ -55,14 +56,12 @@ class ImageViewerNode(Node):
     def _yolo_cb(self, msg):
         try:
             self.yolo_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            self.yolo_received = True
         except Exception as e:
             self.get_logger().error(f'YOLO callback: {e}')
 
     def _color_cb(self, msg):
         try:
             self.color_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            self.color_received = True
         except Exception as e:
             self.get_logger().error(f'Color callback: {e}')
 
@@ -73,10 +72,12 @@ class ImageViewerNode(Node):
             self.get_logger().error(f'Fused callback: {e}')
 
     def _display_cb(self):
+        if self._quit:
+            return
+
         if self.yolo_image is not None:
             cv2.imshow('YOLO Depth + BBoxes', self.yolo_image)
         else:
-            # Placeholder matches default 640x480 (H, W)
             ph = np.zeros((480, 640, 3), dtype=np.uint8)
             cv2.putText(
                 ph, 'Waiting for /realsense_yolo/depth_with_bboxes...',
@@ -106,9 +107,12 @@ class ImageViewerNode(Node):
                 cv2.imshow('Fused Depth + LiDAR + YOLO', ph)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('q') or key == 27:  # q or ESC
-            self.get_logger().info('User quit (q/ESC)')
-            rclpy.shutdown()
+        if key == ord('q') or key == 27:
+            self._quit = True
+            self.get_logger().info('User quit (q/ESC) — shutting down all nodes')
+            self.timer.cancel()
+            cv2.destroyAllWindows()
+            os.kill(os.getpid(), signal.SIGINT)
 
 
 def main(args=None):
@@ -121,7 +125,10 @@ def main(args=None):
     finally:
         cv2.destroyAllWindows()
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ setup(
         ]),
         ('share/' + package_name + '/rviz', ['rviz/realsense_yolo.rviz', 'rviz/fusion_3d.rviz']),
     ],
-    install_requires=['setuptools', 'numpy', 'opencv-python', 'ultralytics'],
+    install_requires=['setuptools'],
     zip_safe=True,
     maintainer='Minh',
     maintainer_email='you@example.com',
@@ -35,6 +35,7 @@ setup(
             'fusion_3d_node = realsense_yolo.fusion_3d_node:main',
             'camera_laser_tf_node = realsense_yolo.camera_laser_tf_node:main',
             'check_topics = realsense_yolo.check_topics:main',
+            'lidar_reset = realsense_yolo.lidar_reset_node:main',
         ],
     },
 )

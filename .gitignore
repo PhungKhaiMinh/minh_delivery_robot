@@ -12,6 +12,9 @@ ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
 
+# Third-party ROS2 packages (clone separately)
+ros2_ws/src/urg_node2/
+
 # YOLO model weights (auto-downloaded)
 *.pt
 *.onnx

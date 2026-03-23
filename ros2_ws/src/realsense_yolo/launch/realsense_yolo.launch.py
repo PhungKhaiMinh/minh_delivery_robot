@@ -2,7 +2,7 @@
 Launch YOLO detection node + RViz for RealSense D435i.
 
 Run RealSense driver separately first:
-  ros2 launch realsense2_camera rs_launch.py align_depth:=true
+  ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true
 
 Then run this launch, or use realsense_yolo_full.launch.py to start both.
 """
@@ -55,6 +55,7 @@ def generate_launch_description():
                 'confidence_threshold': LaunchConfiguration('confidence'),
             }],
             output='screen',
+            additional_env={'LD_PRELOAD': '/lib/aarch64-linux-gnu/libgomp.so.1'},
         ),
 
         Node(
