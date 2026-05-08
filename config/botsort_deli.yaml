@@ -1,0 +1,44 @@
+# BoT-SORT tracker — tuned cho Jetson AGX Xavier + D435i + YOLO11n TRT engine
+#
+# Ghi chú cực quan trọng (đã đo được bằng profile):
+#   * Khi YOLO chạy dưới dạng TensorRT engine (file .engine), backbone KHÔNG có
+#     head Re-ID. Nếu bật `with_reid: True`, Ultralytics sẽ cố lấy appearance
+#     feature qua một code path fallback rất chậm → mỗi gọi `.track()` tới
+#     ~170 ms (5-6 FPS trần) mà vẫn KHÔNG giúp re-identify được (ID vẫn nhảy
+#     sau occlusion). Vì vậy bắt buộc tắt `with_reid: False` khi dùng engine.
+#   * Thay vì appearance, ta dựa hoàn toàn vào:
+#        - Kalman filter motion prediction
+#        - IoU matching với `match_thresh` lỏng (0.90)
+#        - `track_buffer` đủ dài (~3 s) để giữ track qua occlusion
+#     → nếu vật xuất hiện lại GẦN vị trí dự đoán thì ID được tái gán.
+#   * GMC `none`: robot di chuyển chậm → không cần optical flow CPU (GMC rất nặng).
+
+tracker_type: botsort
+
+# ── Detection thresholds ────────────────────────────────────────────────
+# Cho phép cả detection “yếu” (conf thấp) tham gia tracking để giữ chain
+# khi một frame bị nhiễu / che một phần.
+track_high_thresh: 0.25
+track_low_thresh: 0.05
+new_track_thresh: 0.40
+
+# ── Track lifecycle ────────────────────────────────────────────────────
+# 90 frame @ 30 FPS ≈ 3.0 s giữ track sau khi mất bóng (đúng yêu cầu 2–3 s).
+# Nếu camera thật chỉ 15 FPS (bị kernel drop), ta vẫn đạt ~6 s buffer — an toàn.
+track_buffer: 90
+match_thresh: 0.90        # IoU ghép khung lỏng hơn ⇒ qua occlusion ngắn vẫn giữ ID
+
+# ── Score fusion ───────────────────────────────────────────────────────
+fuse_score: True
+
+# ── Global Motion Compensation ─────────────────────────────────────────
+gmc_method: none          # tắt optical flow CPU (rất nặng) — robot chậm không cần
+
+# ── BoT-SORT Re-ID gating ─────────────────────────────────────────────
+# Tham số vẫn giữ trong file để Ultralytics không báo thiếu key, nhưng chúng
+# CHỈ có hiệu lực khi `with_reid: True`. Ta để `with_reid: False` để tránh
+# fallback đường chậm → `.track()` còn ~20-40 ms thay vì ~170 ms.
+proximity_thresh: 0.70
+appearance_thresh: 0.60
+with_reid: False
+model: auto
