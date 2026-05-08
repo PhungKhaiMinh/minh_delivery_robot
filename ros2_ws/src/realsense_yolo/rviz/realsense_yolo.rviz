@@ -1,0 +1,68 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 70
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Status1
+        - /Grid1
+        - /Depth with BBoxes1
+        - /Depth with BBoxes1/Topic1
+        - /Color (fallback)1
+        - /Color (fallback)1/Topic1
+      Splitter Ratio: 0.5
+    Tree Height: 350
+  - Class: rviz_common/Views
+    Name: Views
+    Splitter Ratio: 0.5
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Depth with BBoxes
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /realsense_yolo/depth_with_bboxes
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Color (fallback)
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /camera/color/image_raw
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: camera_link
+    Frame Rate: 30
+  Name: root
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 800
+  Image:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 1280

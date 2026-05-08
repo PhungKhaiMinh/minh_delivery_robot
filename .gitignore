@@ -1,5 +1,37 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
+
+# ROS2 build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Third-party ROS2 packages (clone separately)
+ros2_ws/src/urg_node2/
+
+# YOLO model weights (auto-downloaded)
 *.pt
 *.onnx
 *.engine
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+venv/
+env/

@@ -1,5 +1,8 @@
 # realsense_yolo (fusion_3d only)
 
+> **Git history:** Older commits still contain the previous *Minh Delivery Robot* tree and long README. Use `git log` and `git show <hash>:README.md` to read them.  
+> **Lịch sử Git:** Các commit cũ vẫn giữ README và cấu trúc workspace trước đây — xem `git log` / `git show`.
+
 ROS 2 Python package: **RealSense D435i** + **YOLO11** (+ TensorRT) + **URG LiDAR** → **`/obstacles`** cho robot.
 
 ## Chạy
